@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// ─────────────────────────────────────────────────────────────
+//  StudyHub - Prisma schema  •  PostgreSQL
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────── Enums ─────────────
+enum UserRole {
+  STUDENT
+  LECTURER
+  ADMIN
+}
+
+enum AuthProvider {
+  PASSWORD
+  GOOGLE
+}
+
+enum ReactionType {
+  LIKE
+  DISLIKE
+  LOVE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+}
+
+enum ModActionType {
+  APPROVE
+  REJECT
+}
+
+// ───────────── Core Identity ─────────────
+model User {
+  id           Int         @id @default(autoincrement())
+  userId       String      @default(uuid())
+  email        String      @unique
+  firstname    String
+  lastname     String
+  username     String      @unique
+  avatarUrl    String?
+  bio          String?
+  role         UserRole    @default(STUDENT)
+  level        Int?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  departmentId Int?
+  faculty      Faculty?    @relation(fields: [facultyId], references: [id])
+  facultyId    Int?
+
+  resources     Resource[]
+  credentials   Credential[]
+  synopsisEdits CourseSynopsisHistory[]
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  Thread           Thread[]
+  Post             Post[]
+  Reaction         Reaction[]
+  Report           Report[]
+  ModerationAction ModerationAction[]
+}
+
+model Credential {
+  id           Int          @id @default(autoincrement())
+  provider     AuthProvider
+  providerId   String
+  passwordHash String?
+  userId       Int
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerId])
+}
+
+// ───────────── Academic Structure ─────────────
+model Department {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String   @unique
+  courses   Course[]
+  users     User[]
+  faculty   Faculty  @relation(fields: [facultyId], references: [id])
+  facultyId Int
+
+  createdAt DateTime @default(now())
+}
+
+// ───────────── Faculty ─────────────
+model Faculty {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  departments Department[]
+  users       User[]
+
+  createdAt DateTime @default(now())
+}
+
+model Course {
+  id           Int        @id @default(autoincrement())
+  code         String     @unique
+  title        String
+  synopsis     String     @db.Text
+  departmentId Int
+  department   Department @relation(fields: [departmentId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  resources       Resource[]
+  synopsisHistory CourseSynopsisHistory[]
+  Thread          Thread[]
+}
+
+model CourseSynopsisHistory {
+  id        Int      @id @default(autoincrement())
+  content   String   @db.Text
+  courseId  Int
+  course    Course   @relation(fields: [courseId], references: [id])
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([courseId])
+  @@index([userId])
+}
+
+// ───────────── Resource Repository ─────────────
+model Resource {
+  id          Int     @id @default(autoincrement())
+  title       String
+  description String?
+  fileUrl     String
+  fileType    String
+  uploaderId  Int
+  uploader    User    @relation(fields: [uploaderId], references: [id])
+  courseId    Int
+  courseName  String?
+  course      Course  @relation(fields: [courseId], references: [id])
+  tags        Tag[]   @relation("ResourcesOnTags")
+
+  createdAt DateTime @default(now())
+  Report    Report[]
+}
+
+model Tag {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  resources Resource[] @relation("ResourcesOnTags")
+}
+
+// ───────────── Forums & Reactions ─────────────
+model Thread {
+  id        Int      @id @default(autoincrement())
+  title     String
+  courseId  Int
+  course    Course   @relation(fields: [courseId], references: [id])
+  authorId  Int
+  author    User     @relation(fields: [authorId], references: [id])
+  posts     Post[]
+  createdAt DateTime @default(now())
+}
+
+model Post {
+  id       Int    @id @default(autoincrement())
+  content  String
+  authorId Int
+  author   User   @relation(fields: [authorId], references: [id])
+  threadId Int
+  thread   Thread @relation(fields: [threadId], references: [id])
+  parentId Int?
+  parent   Post?  @relation("PostReplies", fields: [parentId], references: [id])
+  replies  Post[] @relation("PostReplies")
+
+  reactions Reaction[]
+  reports   Report[]
+  createdAt DateTime   @default(now())
+}
+
+model Reaction {
+  id        Int          @id @default(autoincrement())
+  type      ReactionType
+  postId    Int
+  post      Post         @relation(fields: [postId], references: [id])
+  userId    Int
+  user      User         @relation(fields: [userId], references: [id])
+  createdAt DateTime     @default(now())
+
+  @@unique([postId, userId, type])
+}
+
+// ───────────── Moderation ─────────────
+model Report {
+  id         Int       @id @default(autoincrement())
+  reporterId Int
+  reporter   User      @relation(fields: [reporterId], references: [id])
+  reason     String
+  resourceId Int?
+  resource   Resource? @relation(fields: [resourceId], references: [id])
+  postId     Int?
+  post       Post?     @relation(fields: [postId], references: [id])
+  handled    Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  action ModerationAction?
+}
+
+model ModerationAction {
+  id          Int           @id @default(autoincrement())
+  reportId    Int           @unique
+  report      Report        @relation(fields: [reportId], references: [id])
+  moderatorId Int
+  moderator   User          @relation(fields: [moderatorId], references: [id])
+  action      ModActionType
+  note        String?
+  createdAt   DateTime      @default(now())
+}

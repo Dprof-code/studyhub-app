@@ -27,19 +27,31 @@ export async function POST(req: Request) {
             folder: 'studyhub/resources',
             public_id: `resource-${session.user.uid}-${Date.now()}`,
             resource_type: 'auto',
+            use_filename: true,
+            unique_filename: true,
         };
 
-        // Only apply image transformations for image files
-        if (file.type.startsWith('image/')) {
-            uploadOptions.transformation = [
-                { width: 400, height: 400, crop: "fill" },
-                { quality: "auto" },
-                { fetch_format: "auto" }
-            ];
+        // Specific options for different file types
+        if (file.type === 'application/pdf') {
+            uploadOptions.format = 'pdf';
+        } else if (file.type.startsWith('image/')) {
+            uploadOptions.quality = 'auto:best';
+            uploadOptions.fetch_format = 'auto';
         }
+
+        // Only apply image transformations for image files
+        // if (file.type.startsWith('image/')) {
+        //     uploadOptions.transformation = [
+        //         { width: 400, height: 400, crop: "fill" },
+        //         { quality: "auto" },
+        //         { fetch_format: "auto" }
+        //     ];
+        // }
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataURI, uploadOptions);
+
+        console.log('File uploaded successfully:', result);
 
         return NextResponse.json({
             fileUrl: result.secure_url,

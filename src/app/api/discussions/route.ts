@@ -18,11 +18,11 @@ export async function GET(req: Request) {
         }
 
         // Build orderBy clause
-        let orderBy: any = [{ createdAt: 'desc' }];
+        let orderBy: any[] = [{ createdAt: 'desc' }];
         if (sort === 'active') {
-            orderBy = [{ lastPost: { createdAt: 'desc' } }];
+            orderBy = [{ posts: { _count: 'desc' } }];
         } else if (sort === 'popular') {
-            orderBy = [{ _count: { posts: 'desc' } }];
+            orderBy = [{ posts: { _count: 'desc' } }];
         }
 
         const threads = await db.thread.findMany({

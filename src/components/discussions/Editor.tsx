@@ -11,6 +11,7 @@ type EditorProps = {
     onChange: (content: string) => void;
     content?: string;
     placeholder?: string;
+    onMount?: (editor: Editor) => void;
 };
 
 const MenuBar = ({ editor }: { editor: any }) => {
@@ -74,7 +75,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
     );
 };
 
-export function Editor({ onChange, content = '', placeholder }: EditorProps) {
+export function Editor({ onChange, content = '', placeholder, onMount }: EditorProps) {
     const editor = useEditor({
         extensions: [
             StarterKit,
@@ -85,9 +86,13 @@ export function Editor({ onChange, content = '', placeholder }: EditorProps) {
             CodeBlock,
         ],
         content,
+        placeholder: placeholder || 'Start typing...',
         immediatelyRender: false,
         onUpdate: ({ editor }) => {
             onChange(editor.getHTML());
+        },
+        onCreate: ({ editor }) => {
+            onMount?.(editor);
         },
         editorProps: {
             attributes: {

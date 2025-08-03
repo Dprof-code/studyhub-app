@@ -73,6 +73,7 @@ model User {
   Reaction         Reaction[]
   Report           Report[]
   ModerationAction ModerationAction[]
+  ResourceComment  ResourceComment[]
 }
 
 model Credential {
@@ -114,6 +115,7 @@ model Course {
   code         String     @unique
   title        String
   synopsis     String     @db.Text
+  level        Int        @default(100) // Default level set to 100
   departmentId Int
   department   Department @relation(fields: [departmentId], references: [id])
   createdAt    DateTime   @default(now())
@@ -138,20 +140,21 @@ model CourseSynopsisHistory {
 
 // ───────────── Resource Repository ─────────────
 model Resource {
-  id          Int     @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   title       String
   description String?
   fileUrl     String
   fileType    String
   uploaderId  Int
-  uploader    User    @relation(fields: [uploaderId], references: [id])
+  uploader    User              @relation(fields: [uploaderId], references: [id])
   courseId    Int
   courseName  String?
-  course      Course  @relation(fields: [courseId], references: [id])
-  tags        Tag[]   @relation("ResourcesOnTags")
-
-  createdAt DateTime @default(now())
-  Report    Report[]
+  course      Course            @relation(fields: [courseId], references: [id])
+  tags        Tag[]             @relation("ResourcesOnTags")
+  year        Int?
+  createdAt   DateTime          @default(now())
+  Report      Report[]
+  comments    ResourceComment[]
 }
 
 model Tag {
@@ -160,28 +163,47 @@ model Tag {
   resources Resource[] @relation("ResourcesOnTags")
 }
 
+model ResourceComment {
+  id         Int               @id @default(autoincrement())
+  content    String
+  resourceId Int
+  resource   Resource          @relation(fields: [resourceId], references: [id])
+  authorId   Int
+  author     User              @relation(fields: [authorId], references: [id])
+  parentId   Int?
+  parent     ResourceComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies    ResourceComment[] @relation("CommentReplies")
+  createdAt  DateTime          @default(now())
+
+  @@index([resourceId])
+  @@index([authorId])
+}
+
 // ───────────── Forums & Reactions ─────────────
 model Thread {
-  id        Int      @id @default(autoincrement())
-  title     String
-  courseId  Int
-  course    Course   @relation(fields: [courseId], references: [id])
-  authorId  Int
-  author    User     @relation(fields: [authorId], references: [id])
-  posts     Post[]
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  title      String
+  courseId   Int
+  course     Course   @relation(fields: [courseId], references: [id])
+  authorId   Int
+  author     User     @relation(fields: [authorId], references: [id])
+  posts      Post[]
+  isStickied Boolean  @default(false)
+  isLocked   Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 model Post {
-  id       Int    @id @default(autoincrement())
-  content  String
-  authorId Int
-  author   User   @relation(fields: [authorId], references: [id])
-  threadId Int
-  thread   Thread @relation(fields: [threadId], references: [id])
-  parentId Int?
-  parent   Post?  @relation("PostReplies", fields: [parentId], references: [id])
-  replies  Post[] @relation("PostReplies")
+  id          Int      @id @default(autoincrement())
+  content     String
+  authorId    Int
+  author      User     @relation(fields: [authorId], references: [id])
+  threadId    Int
+  thread      Thread   @relation(fields: [threadId], references: [id])
+  parentId    Int?
+  parent      Post?    @relation("PostReplies", fields: [parentId], references: [id])
+  replies     Post[]   @relation("PostReplies")
+  attachments String[] @default([])
 
   reactions Reaction[]
   reports   Report[]

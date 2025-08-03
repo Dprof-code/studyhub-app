@@ -12,6 +12,9 @@ const resourceSchema = z.object({
     tags: z.array(z.string()),
     fileUrl: z.string(),
     fileType: z.string(),
+    year: z.number().optional(),
+}).refine(data => data.courseId || data.courseName, {
+    message: "Either courseId or courseName must be provided"
 });
 
 export async function POST(req: Request) {
@@ -38,8 +41,8 @@ export async function POST(req: Request) {
                 description: data.description,
                 fileUrl: data.fileUrl,
                 fileType: data.fileType,
-                courseId: data?.courseId,
-                courseName: data?.courseName,
+                courseId: data.courseId!,
+                courseName: data.courseId ? undefined : data.courseName,
                 uploaderId: user.id,
                 tags: {
                     connectOrCreate: data.tags.map(tag => ({
@@ -47,6 +50,7 @@ export async function POST(req: Request) {
                         create: { name: tag },
                     })),
                 },
+                year: data?.year,
             },
         });
 
@@ -69,6 +73,7 @@ export async function GET(req: Request) {
         const tags = searchParams.get('tags')?.split(',');
         const types = searchParams.get('types')?.split(',');
         const departments = searchParams.get('departments')?.split(',');
+        const years = searchParams.get('years')?.split(',').map(Number);
 
         // Build the where clause based on filters
         const where: any = {};
@@ -144,6 +149,19 @@ export async function GET(req: Request) {
                 }
             });
             where.OR = [...(where.OR || []), ...typeFilters];
+        }
+
+        // Year filter (only apply to resources tagged as past-questions)
+        if (years && years.length > 0) {
+            where.AND = [
+                ...(where.AND || []),
+                {
+                    AND: [
+                        { tags: { some: { name: 'past-question' } } },
+                        { year: { in: years } }
+                    ]
+                }
+            ];
         }
 
         // Get total count for pagination

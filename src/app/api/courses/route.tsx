@@ -16,7 +16,11 @@ const courseSchema = z.object({
         name: z.string().min(2),
         id: z.number().optional()
     }),
-});
+}).transform((data) => ({
+    ...data,
+    // Extract level from course code (e.g., CSC101 -> 100)
+    level: parseInt(data.code.match(/\d{3}/)[0].charAt(0)) * 100
+}));
 
 export async function POST(req: Request) {
     try {
@@ -89,6 +93,7 @@ export async function POST(req: Request) {
                 title: validatedData.title,
                 synopsis: validatedData.synopsis,
                 departmentId: department.id,
+                level: validatedData.level,
             },
         });
 
@@ -103,6 +108,56 @@ export async function POST(req: Request) {
         }
         return NextResponse.json(
             { error: 'Internal server error' },
+            { status: 500 }
+        );
+    }
+}
+
+export async function GET(request: Request) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const search = searchParams.get('search');
+        const department = searchParams.get('department');
+        const level = searchParams.get('level');
+
+        const courses = await db.course.findMany({
+            where: {
+                AND: [
+                    search ? {
+                        OR: [
+                            { title: { contains: search, mode: 'insensitive' } },
+                            { code: { contains: search, mode: 'insensitive' } },
+                        ],
+                    } : {},
+                    department ? {
+                        department: {
+                            code: department
+                        }
+                    } : {},
+                    level ? {
+                        level: parseInt(level)
+                    } : {},
+                ],
+            },
+            include: {
+                department: {
+                    select: {
+                        name: true,
+                        code: true,
+                    },
+                },
+            },
+            orderBy: [
+                { level: 'asc' },
+                { code: 'asc' },
+            ],
+        });
+
+        return NextResponse.json(courses);
+    } catch (error) {
+        console.error('Error fetching courses:', error);
+        return NextResponse.json(
+            { error: 'Failed to fetch courses' },
             { status: 500 }
         );
     }

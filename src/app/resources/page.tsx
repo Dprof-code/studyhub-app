@@ -15,6 +15,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import Link from 'next/link';
+
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: 15 }, (_, i) => CURRENT_YEAR - i);
 
 type Department = {
     id: number;
@@ -44,6 +48,7 @@ type Resource = {
         lastname: string;
         avatarUrl: string | null;
     };
+    year?: number;
     tags: Array<{ id: number; name: string }>;
     createdAt: string;
 };
@@ -68,6 +73,7 @@ export default function ResourcesPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const lastItemRef = useRef<HTMLDivElement>(null);
     const [selectedDepartments, setSelectedDepartments] = useState<number[]>([]);
+    const [selectedYears, setSelectedYears] = useState<number[]>([]);
 
     const { ref, entry } = useIntersection({
         root: null,
@@ -90,6 +96,7 @@ export default function ResourcesPage() {
             ...(selectedTags.length && { tags: selectedTags.join(',') }),
             ...(selectedTypes.length && { types: selectedTypes.join(',') }),
             ...(selectedDepartments.length && { departments: selectedDepartments.join(',') }),
+            ...(selectedYears.length && { years: selectedYears.join(',') }),
             ...(searchQuery && { search: searchQuery }),
         });
 
@@ -105,7 +112,7 @@ export default function ResourcesPage() {
         isFetchingNextPage,
         isLoading,
     } = useInfiniteQuery({
-        queryKey: ['resources', selectedTags, selectedTypes, selectedDepartments, searchQuery],
+        queryKey: ['resources', selectedTags, selectedTypes, selectedDepartments, selectedYears, searchQuery],
         queryFn: fetchResources,
         getNextPageParam: (lastPage) =>
             lastPage.hasMore ? lastPage.nextCursor : undefined,
@@ -219,6 +226,37 @@ export default function ResourcesPage() {
                                         </div>
                                     </AccordionContent>
                                 </AccordionItem>
+
+                                <AccordionItem value="year">
+                                    <AccordionTrigger>Past Question Year</AccordionTrigger>
+                                    <AccordionContent>
+                                        <div className="space-y-2">
+                                            {YEARS.map((year) => (
+                                                <div key={year} className="flex items-center space-x-2">
+                                                    <Checkbox
+                                                        id={`year-${year}`}
+                                                        checked={selectedYears.includes(year)}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) {
+                                                                setSelectedYears([...selectedYears, year]);
+                                                            } else {
+                                                                setSelectedYears(
+                                                                    selectedYears.filter(y => y !== year)
+                                                                );
+                                                            }
+                                                        }}
+                                                    />
+                                                    <label
+                                                        htmlFor={`year-${year}`}
+                                                        className="text-sm"
+                                                    >
+                                                        {year}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
                             </Accordion>
                         </div>
                     </div>
@@ -239,45 +277,46 @@ export default function ResourcesPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {data?.pages.map((page) =>
                                     page.resources.map((resource: Resource, idx: number) => (
-                                        <div
-                                            key={resource.id}
-                                            ref={idx === page.resources.length - 1 ? ref : null}
-                                            className="bg-card rounded-lg shadow-sm hover:shadow-md transition-shadow"
-                                        >
-                                            <div className="aspect-video relative overflow-hidden rounded-t-lg">
-                                                <img
-                                                    src={getThumbnail(resource.fileType, resource.fileUrl)}
-                                                    alt={resource.title}
-                                                    className="object-cover w-full h-full"
-                                                />
-                                            </div>
-                                            <div className="p-4">
-                                                <h3 className="font-semibold mb-2 line-clamp-2">
-                                                    {resource.title}
-                                                </h3>
-                                                <div className="flex flex-wrap gap-1 mb-3">
-                                                    {resource.tags.map((tag) => (
-                                                        <Badge key={tag.id} variant="secondary">
-                                                            {tag.name}
-                                                        </Badge>
-                                                    ))}
+                                        <Link key={resource.id} href={`/resources/${resource.id}`}>
+                                            <div
+                                                ref={idx === page.resources.length - 1 ? ref : null}
+                                                className="bg-card rounded-lg shadow-sm hover:shadow-md transition-shadow"
+                                            >
+                                                <div className="aspect-video relative overflow-hidden rounded-t-lg">
+                                                    <img
+                                                        src={getThumbnail(resource.fileType, resource.fileUrl)}
+                                                        alt={resource.title}
+                                                        className="object-cover w-full h-full"
+                                                    />
                                                 </div>
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <Avatar
-                                                            src={resource.uploader.avatarUrl || '/avatar.jpg'}
-                                                            alt={resource.uploader.username}
-                                                        />
-                                                        <span className="text-sm text-muted-foreground">
-                                                            {resource.uploader.firstname} {resource.uploader.lastname}
+                                                <div className="p-4">
+                                                    <h3 className="font-semibold mb-2 line-clamp-2">
+                                                        {resource.title}
+                                                    </h3>
+                                                    <div className="flex flex-wrap gap-1 mb-3">
+                                                        {resource.tags.map((tag) => (
+                                                            <Badge key={tag.id} variant="secondary">
+                                                                {tag.name}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar
+                                                                src={resource.uploader.avatarUrl || '/avatar.jpg'}
+                                                                alt={resource.uploader.username}
+                                                            />
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {resource.uploader.firstname} {resource.uploader.lastname}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {new Date(resource.createdAt).toLocaleDateString()}
                                                         </span>
                                                     </div>
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {new Date(resource.createdAt).toLocaleDateString()}
-                                                    </span>
                                                 </div>
                                             </div>
-                                        </div>
+                                        </Link>
                                     ))
                                 )}
                             </div>

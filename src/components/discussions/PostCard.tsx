@@ -4,9 +4,18 @@ import { useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { PostEditor } from './PostEditor';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { formatDistance } from 'date-fns/formatDistance';
+import { formatDistanceToNow } from 'date-fns';
+import { ReplyEditor } from '@/components/discussions/ReplyEditor';
+import { FileUpload } from './FileUpload';
 
 const REACTIONS = [
     { emoji: '👍', name: 'thumbs_up' },
@@ -16,8 +25,29 @@ const REACTIONS = [
     { emoji: '🤔', name: 'thinking' },
 ];
 
+interface Post {
+    id: number;
+    content: string;
+    threadId: number;
+    authorId: number;
+    createdAt: Date;
+    author: {
+        id: number;
+        firstname: string;
+        email: string;
+        lastname: string;
+        username: string;
+        avatarUrl?: string;
+    };
+    reactions: any[];
+    _count: {
+        reactions: number;
+    };
+    attachments?: string[];
+}
+
 type PostCardProps = {
-    post: any; // Use the Post type from your thread page
+    post: Post;
     onReply: () => void;
     className?: string;
 };
@@ -25,6 +55,37 @@ type PostCardProps = {
 export function PostCard({ post, onReply, className }: PostCardProps) {
     const { data: session } = useSession();
     const [showReactions, setShowReactions] = useState(false);
+    const [isReplying, setIsReplying] = useState(false);
+
+    const [isEditing, setIsEditing] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const isAuthor = Number(session?.user?.id) === post?.author?.id;
+    console.log("Ai isAuthor:", isAuthor);
+
+    const handleDelete = async () => {
+        if (!confirm('Are you sure you want to delete this post?')) return;
+
+        setIsDeleting(true);
+        try {
+            const pathSegments = window.location.pathname.split('/');
+            const courseCode = pathSegments[2];
+            const threadId = pathSegments[4];
+
+            const response = await fetch(
+                `/api/courses/${courseCode}/threads/${threadId}/posts/${post.id}`,
+                { method: 'DELETE' }
+            );
+
+            if (!response.ok) throw new Error('Failed to delete post');
+
+            toast.success('Post deleted successfully');
+        } catch (error) {
+            toast.error('Failed to delete post');
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     const handleReaction = async (reactionType: string) => {
         if (!session?.user) {
@@ -48,24 +109,88 @@ export function PostCard({ post, onReply, className }: PostCardProps) {
 
     return (
         <div className={cn("bg-card p-4 rounded-lg space-y-4", className)}>
-            {/* Author Info */}
-            <div className="flex items-center gap-3">
-                <Avatar
-                    src={post.author.avatarUrl || '/avatar.jpg'}
-                    alt={post.author.username}
-                />
-                <div>
-                    <div className="font-medium">
-                        {post.author.firstname} {post.author.lastname}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                        {formatDistance(new Date(post.createdAt), { addSuffix: true })}
+            <div className="flex items-start justify-between">
+                {/* Author Info */}
+                <div className="flex items-center gap-3">
+                    <Avatar
+                        src={post.author.avatarUrl || '/avatar.jpg'}
+                        alt={post.author.username}
+                    />
+                    <div>
+                        <div className="font-medium">
+                            {post.author.firstname} {post.author.lastname}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                            {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+                        </div>
                     </div>
                 </div>
+
+                {isAuthor && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                                <span className="material-symbols-outlined">more_vert</span>
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setIsEditing(true)}>
+                                <span className="material-symbols-outlined mr-2">edit</span>
+                                Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onClick={handleDelete}
+                                className="text-destructive"
+                            >
+                                <span className="material-symbols-outlined mr-2">delete</span>
+                                Delete
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
             </div>
 
+            {isEditing ? (
+                <PostEditor
+                    postId={post.id}
+                    initialContent={post.content}
+                    onCancel={() => setIsEditing(false)}
+                    onSave={() => setIsEditing(false)}
+                />
+            ) : (
+                <div dangerouslySetInnerHTML={{ __html: post.content }} />
+            )}
+
+            {/* Attachments */}
+            {post.attachments && post.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                    {post.attachments.map((url, index) => {
+                        const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                        return isImage ? (
+                            <img
+                                key={index}
+                                src={url}
+                                alt="Attachment"
+                                className="max-w-[200px] h-auto rounded-lg cursor-pointer hover:opacity-90"
+                                onClick={() => window.open(url, '_blank')}
+                            />
+                        ) : (
+                            <Button
+                                key={index}
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(url, '_blank')}
+                            >
+                                <span className="material-symbols-outlined mr-2">attach_file</span>
+                                View Attachment
+                            </Button>
+                        );
+                    })}
+                </div>
+            )}
+
             {/* Content */}
-            <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: post.content }} />
+            {/* <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: post.content }} /> */}
 
             {/* Actions */}
             <div className="flex items-center gap-4">
@@ -107,6 +232,21 @@ export function PostCard({ post, onReply, className }: PostCardProps) {
                     Reply
                 </Button>
             </div>
+
+            {/* Reply Editor */}
+            {isReplying && (
+                <div className="mt-4">
+                    <ReplyEditor
+                        threadId={post.threadId}
+                        parentId={post.id}
+                        onSuccess={() => {
+                            setIsReplying(false);
+                            onReply?.();
+                        }}
+                        onCancel={() => setIsReplying(false)}
+                    />
+                </div>
+            )}
 
             {/* Reactions Display */}
             {post._count.reactions > 0 && (

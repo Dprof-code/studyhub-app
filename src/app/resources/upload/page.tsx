@@ -32,6 +32,7 @@ const resourceSchema = z.object({
     tags: z.array(z.string()).min(1, 'Please select at least one tag'),
     fileUrl: z.string().optional(),
     fileType: z.string().optional(),
+    year: z.number().optional(),
 });
 
 type ResourceFormData = z.infer<typeof resourceSchema>;
@@ -63,6 +64,7 @@ export default function UploadResources() {
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [courseQuery, setCourseQuery] = useState('');
     const [courseSuggestions, setCourseSuggestions] = useState<Array<{ id: number; code: string; title: string; department: { name: string; faculty: { name: string } } }>>([]);
+    const [selectedCourse, setSelectedCourse] = useState<{ id: number; code: string; title: string } | null>(null);
     const debouncedCourseQuery = useDebounce(courseQuery, 300);
 
     const {
@@ -133,6 +135,11 @@ export default function UploadResources() {
             return;
         }
 
+        if (selectedTags.includes('past-question') && !data.year) {
+            toast.error('Please specify the year for past question');
+            return;
+        }
+
         setIsUploading(true);
         try {
             // Handle file upload
@@ -158,7 +165,11 @@ export default function UploadResources() {
             const response = await fetch('/api/resources', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
+                body: JSON.stringify({
+                    ...data,
+                    courseName: selectedCourse ? undefined : courseQuery,
+                    year: selectedTags.includes('past-question') ? data.year : undefined,
+                }),
             });
 
             if (!response.ok) {
@@ -247,18 +258,23 @@ export default function UploadResources() {
                                 <Input
                                     id="course"
                                     value={courseQuery}
-                                    onChange={(e) => setCourseQuery(e.target.value)}
+                                    onChange={(e) => {
+                                        setCourseQuery(e.target.value);
+                                        setSelectedCourse(null); // Reset selected course when input changes
+                                        setValue('courseId', undefined);
+                                        setValue('courseName', undefined);
+                                    }}
                                     placeholder="Search for course code (e.g., CSC 101)"
                                 />
-                                {courseSuggestions.length > 0 && (
+                                {courseSuggestions.length > 0 && !selectedCourse && (
                                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
                                         {courseSuggestions.map((course) => (
                                             <div
                                                 key={course.id}
                                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
                                                 onClick={() => {
+                                                    setSelectedCourse(course);
                                                     setValue('courseId', course.id);
-                                                    setValue('courseName', undefined);
                                                     setCourseQuery(`${course.code} - ${course.title}`);
                                                     setCourseSuggestions([]);
                                                 }}
@@ -269,7 +285,7 @@ export default function UploadResources() {
                                         ))}
                                     </div>
                                 )}
-                                {courseQuery && courseSuggestions.length === 0 && !errors.courseId && (
+                                {courseQuery && !selectedCourse && courseSuggestions.length === 0 && !errors.courseId && (
                                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-4">
                                         <p className="text-sm text-gray-600">Course not found</p>
                                         <div className="mt-2 flex gap-2">
@@ -281,7 +297,6 @@ export default function UploadResources() {
                                                     if (window.confirm('Would you like to create this course?')) {
                                                         router.push('/courses/new');
                                                     } else {
-                                                        // Save as course name instead of ID
                                                         setValue('courseId', undefined);
                                                         setValue('courseName', courseQuery);
                                                     }
@@ -294,7 +309,6 @@ export default function UploadResources() {
                                                 variant="outline"
                                                 size="sm"
                                                 onClick={() => {
-                                                    // Save as course name instead of ID
                                                     setValue('courseId', undefined);
                                                     setValue('courseName', courseQuery);
                                                 }}
@@ -352,6 +366,42 @@ export default function UploadResources() {
                                 <p className="text-sm text-destructive">{errors.tags.message}</p>
                             )}
                         </div>
+
+                        {/* past question year */}
+                        {selectedTags.includes('past-question') && (
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium" htmlFor="year">
+                                    Question Year
+                                </label>
+                                <div className="flex gap-2 items-center">
+                                    <Input
+                                        id="year"
+                                        type="number"
+                                        min={1900}
+                                        max={new Date().getFullYear()}
+                                        placeholder="Enter year (e.g., 2023)"
+                                        {...register('year', {
+                                            setValueAs: (v) => v === "" ? undefined : parseInt(v, 10),
+                                            validate: (value) => {
+                                                if (selectedTags.includes('past-question')) {
+                                                    if (!value) return 'Year is required for past questions';
+                                                    if (value < 1900 || value > new Date().getFullYear()) {
+                                                        return 'Please enter a valid year';
+                                                    }
+                                                }
+                                                return true;
+                                            }
+                                        })}
+                                    />
+                                    <span className="text-sm text-muted-foreground">
+                                        {new Date().getFullYear()}
+                                    </span>
+                                </div>
+                                {errors.year && (
+                                    <p className="text-sm text-destructive">{errors.year.message}</p>
+                                )}
+                            </div>
+                        )}
 
                         {/* Submit Button */}
                         <Button

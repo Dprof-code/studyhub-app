@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useDebounce } from '@/hooks/useDebounce';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import {
     Select,
     SelectContent,
@@ -15,7 +14,7 @@ import {
 } from '@/components/ui/select';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { formatDistance } from 'date-fns/formatDistance';
+import { formatDistanceToNow } from 'date-fns';
 
 type Thread = {
     id: number;
@@ -67,6 +66,8 @@ export default function DiscussionsPage() {
             return response.json();
         },
     });
+
+    console.log(data);
 
     return (
         <div className="min-h-screen bg-background">
@@ -142,7 +143,7 @@ export default function DiscussionsPage() {
                                                 <span>{thread.author.firstname} {thread.author.lastname}</span>
                                             </div>
                                             <span>
-                                                {formatDistance(new Date(thread.createdAt), { addSuffix: true })}
+                                                {formatDistanceToNow(new Date(thread.createdAt), { addSuffix: true })}
                                             </span>
                                             <div className="flex items-center gap-1">
                                                 <span className="material-symbols-outlined text-sm">chat</span>
@@ -153,7 +154,7 @@ export default function DiscussionsPage() {
                                     {thread.lastPost && (
                                         <div className="text-sm text-muted-foreground">
                                             <div>Last reply by {thread.lastPost.author.firstname}</div>
-                                            <div>{formatDistance(new Date(thread.lastPost.createdAt), { addSuffix: true })}</div>
+                                            <div>{formatDistanceToNow(new Date(thread.lastPost.createdAt), { addSuffix: true })}</div>
                                         </div>
                                     )}
                                 </div>

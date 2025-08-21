@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner"
 import Provider from "@/components/Provider";
 import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
+import ClarityInit from "@/components/clarity-init";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -31,6 +32,7 @@ export default function RootLayout({
         />
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>
+        <ClarityInit />
         <Provider>{children}</Provider>
         <Toaster richColors />
         <Analytics />

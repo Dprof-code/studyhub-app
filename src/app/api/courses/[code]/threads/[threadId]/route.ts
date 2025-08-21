@@ -3,7 +3,7 @@ import { db } from '@/lib/dbconfig';
 
 export async function GET(
     req: Request,
-    { params }: { params: { code: string; threadId: string } }
+    { params }: { params: Promise<{ code: string; threadId: string }> }
 ) {
     try {
         const { code, threadId } = await params;

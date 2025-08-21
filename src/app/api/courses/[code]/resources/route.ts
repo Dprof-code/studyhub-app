@@ -3,13 +3,14 @@ import { db } from '@/lib/dbconfig';
 
 export async function GET(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
+        const { code } = await params;
         const resources = await db.resource.findMany({
             where: {
                 course: {
-                    code: params.code,
+                    code: code,
                 },
             },
             include: {

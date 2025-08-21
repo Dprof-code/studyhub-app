@@ -3,10 +3,9 @@ import { db } from '@/lib/dbconfig';
 
 export async function GET(
     req: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        // const resourceId = parseInt(params.id);
         const { id } = await params;
         const resourceId = parseInt(id);
         if (isNaN(resourceId)) {

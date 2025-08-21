@@ -10,7 +10,11 @@ export async function GET(req: Request) {
         const limit = parseInt(searchParams.get('limit') || '6', 10);
 
         // Build the where clause for the query
-        const where: any = {
+        const where: {
+            NOT?: { id: number };
+            OR?: Array<{ courseId: number } | { AND: [{ tags: { some: { name: { in: string[] } } } }, { NOT: { courseId: number } }] }>;
+            tags?: { some: { name: { in: string[] } } };
+        } = {
             // Exclude the current resource
             NOT: { id: parseInt(exclude!, 10) },
         };

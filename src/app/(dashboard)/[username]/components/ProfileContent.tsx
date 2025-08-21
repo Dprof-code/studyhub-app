@@ -1,6 +1,5 @@
 export function ProfileContent({
     activeTab,
-    username
 }: {
     activeTab: string;
     username: string;

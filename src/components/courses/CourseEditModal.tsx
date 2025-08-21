@@ -13,7 +13,6 @@ type CourseEditModalProps = {
         code: string;
         title: string;
         synopsis: string;
-        level: number;
     };
     isOpen: boolean;
     onClose: () => void;

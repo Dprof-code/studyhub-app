@@ -3,7 +3,7 @@ import { db } from "@/lib/dbconfig";
 
 export async function GET(
     req: Request,
-    { params }: { params: { username: string } }
+    { params }: { params: Promise<{ username: string }> }
 ) {
     try {
         // const session = await getServerSession(authOptions);

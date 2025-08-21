@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { ReplyEditor } from '@/components/discussions/ReplyEditor';
 import { FileUpload } from './FileUpload';
 
@@ -37,8 +37,9 @@ interface Post {
         email: string;
         lastname: string;
         username: string;
-        avatarUrl?: string;
+        avatarUrl: string | null;
     };
+    parentId: number | null;
     reactions: any[];
     _count: {
         reactions: number;
@@ -249,7 +250,7 @@ export function PostCard({ post, onReply, className }: PostCardProps) {
             )}
 
             {/* Reactions Display */}
-            {post._count.reactions > 0 && (
+            {/* {post._count.reactions > 0 && (
                 <div className="flex flex-wrap gap-2">
                     {Object.entries(
                         post.reactions.reduce((acc: any, reaction: any) => {
@@ -265,7 +266,7 @@ export function PostCard({ post, onReply, className }: PostCardProps) {
                         </div>
                     ))}
                 </div>
-            )}
+            )} */}
         </div>
     );
 }

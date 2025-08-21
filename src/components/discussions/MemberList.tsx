@@ -18,7 +18,7 @@ type Member = {
 };
 
 export function MemberList({ courseId }: { courseId: number }) {
-    const { data: members, isLoading } = useQuery({
+    const { data: members, isLoading } = useQuery<Member[]>({
         queryKey: ['course-members', courseId],
         queryFn: async () => {
             const response = await fetch(`/api/courses/${courseId}/members`);
@@ -43,6 +43,10 @@ export function MemberList({ courseId }: { courseId: number }) {
         );
     }
 
+    if (!members) {
+        return <div>No members found</div>;
+    }
+
     const groupedMembers = members.reduce((acc: Record<string, Member[]>, member: Member) => {
         const role = member.role.toLowerCase().replace('_', ' ');
         acc[role] = acc[role] || [];
@@ -52,11 +56,11 @@ export function MemberList({ courseId }: { courseId: number }) {
 
     return (
         <div className="space-y-8">
-            {Object.entries(groupedMembers).map(([role, members]) => (
+            {Object.entries(groupedMembers).map(([role, roleMembers]) => (
                 <div key={role}>
                     <h3 className="text-lg font-semibold mb-4 capitalize">{role}s</h3>
                     <div className="space-y-4">
-                        {members.map((member: Member) => (
+                        {roleMembers.map((member: Member) => (
                             <div
                                 key={member.id}
                                 className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"

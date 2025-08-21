@@ -1,14 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, use } from 'react';
 import { ProfileHeader } from './components/ProfileHeader';
 import { ProfileTabs } from './components/ProfileTabs';
 import { ProfileSidebar } from './components/ProfileSidebar';
 import { ProfileContent } from './components/ProfileContent';
 
-export default function ProfilePage({ params }: { params: { username: string } }) {
+export default function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
     const [activeTab, setActiveTab] = useState('overview');
-    const { username } = params;
+
+    // Unwrap params using React.use()
+    const resolvedParams = use(params);
+    const { username } = resolvedParams;
 
     return (
         <div className="min-h-screen bg-background">

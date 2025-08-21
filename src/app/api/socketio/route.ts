@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Handle Socket.IO upgrade
-    const headersList = headers();
+    const headersList = await headers();
     const upgrade = headersList.get('upgrade');
 
     if (upgrade && upgrade.toLowerCase() === 'websocket') {

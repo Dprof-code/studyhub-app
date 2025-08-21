@@ -1,7 +1,6 @@
 'use client';
 
 import { useDropzone } from 'react-dropzone';
-import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
 type FileUploadProps = {
@@ -42,8 +41,9 @@ export function FileUpload({
                 console.error(error);
             }
         },
-        onDropRejected: (files) => {
-            if (files[0].size > maxSize) {
+        onDropRejected: (fileRejections) => {
+            const rejection = fileRejections[0];
+            if (rejection.file.size > maxSize) {
                 toast.error(`File size must be less than ${maxSize / 1024 / 1024}MB`);
             } else {
                 toast.error('Invalid file type');

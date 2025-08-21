@@ -11,9 +11,10 @@ const updatePostSchema = z.object({
 
 export async function PATCH(
     req: Request,
-    { params }: { params: { code: string; threadId: string; postId: string } }
+    { params }: { params: Promise<{ code: string; threadId: string; postId: string }> }
 ) {
     try {
+        const { threadId, postId } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -26,7 +27,7 @@ export async function PATCH(
         const { content } = updatePostSchema.parse(body);
 
         const post = await db.post.findUnique({
-            where: { id: parseInt(params.postId) },
+            where: { id: parseInt(postId) },
             include: { author: true },
         });
 
@@ -45,7 +46,7 @@ export async function PATCH(
         }
 
         const updatedPost = await db.post.update({
-            where: { id: parseInt(params.postId) },
+            where: { id: parseInt(postId) },
             data: { content },
             include: {
                 author: {
@@ -63,7 +64,7 @@ export async function PATCH(
         // Emit socket event for real-time updates
         const io = getIO();
         if (io) {
-            io.to(`thread-${params.threadId}`).emit('update-post', updatedPost);
+            io.to(`thread-${threadId}`).emit('update-post', updatedPost);
         }
 
         return NextResponse.json(updatedPost);
@@ -78,9 +79,10 @@ export async function PATCH(
 
 export async function DELETE(
     req: Request,
-    { params }: { params: { code: string; threadId: string; postId: string } }
+    { params }: { params: Promise<{ code: string; threadId: string; postId: string }> }
 ) {
     try {
+        const { threadId, postId } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -90,7 +92,7 @@ export async function DELETE(
         }
 
         const post = await db.post.findUnique({
-            where: { id: parseInt(params.postId) },
+            where: { id: parseInt(postId) },
             include: { author: true },
         });
 
@@ -109,13 +111,13 @@ export async function DELETE(
         }
 
         await db.post.delete({
-            where: { id: parseInt(params.postId) },
+            where: { id: parseInt(postId) },
         });
 
         // Emit socket event for real-time updates
         const io = getIO();
         if (io) {
-            io.to(`thread-${params.threadId}`).emit('delete-post', parseInt(params.postId));
+            io.to(`thread-${threadId}`).emit('delete-post', parseInt(postId));
         }
 
         return NextResponse.json({ success: true });

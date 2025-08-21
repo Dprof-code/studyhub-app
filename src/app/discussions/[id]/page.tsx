@@ -5,24 +5,25 @@ import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Editor } from '@/components/discussions/Editor';
-import { formatDistance } from 'date-fns/formatDistance';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { PostCard } from '@/components/discussions/PostCard';
 import { ReplyEditor } from '@/components/discussions/ReplyEditor';
 
 type Post = {
     id: number;
     content: string;
+    threadId: number;
+    authorId: number;
     author: {
         id: number;
         username: string;
+        email: string;
         firstname: string;
         lastname: string;
         avatarUrl: string | null;
     };
     parentId: number | null;
-    createdAt: string;
+    createdAt: Date;
     _count: {
         reactions: number;
     };
@@ -124,7 +125,7 @@ export default function ThreadPage() {
                                     </span>
                                 </div>
                                 <span>
-                                    {formatDistance(new Date(thread?.createdAt || ''), { addSuffix: true })}
+                                    {formatDistanceToNow(new Date(thread?.createdAt || ''), { addSuffix: true })}
                                 </span>
                             </div>
                         </div>

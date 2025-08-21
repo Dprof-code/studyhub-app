@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { formatDistance } from 'date-fns/formatDistance';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 
 type Thread = {
     id: number;
@@ -85,7 +85,7 @@ export function ThreadList({ courseId }: { courseId: number }) {
                                     by {thread.author.firstname} {thread.author.lastname}
                                 </span>
                                 <span>
-                                    {formatDistance(new Date(thread.createdAt), { addSuffix: true })}
+                                    {formatDistanceToNow(new Date(thread.createdAt), { addSuffix: true })}
                                 </span>
                                 <div className="flex items-center gap-1">
                                     <span className="material-symbols-outlined text-sm">chat</span>

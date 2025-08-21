@@ -7,7 +7,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Editor } from '@/components/discussions/Editor';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { PostCard } from '@/components/discussions/PostCard';
 import { ReplyEditor } from '@/components/discussions/ReplyEditor';
 import { useSocket } from '@/hooks/useSocket';
@@ -17,15 +17,18 @@ import { useQueryClient } from '@tanstack/react-query';
 type Post = {
     id: number;
     content: string;
+    threadId: number;
+    authorId: number;
     author: {
         id: number;
         username: string;
         firstname: string;
         lastname: string;
+        email: string;
         avatarUrl: string | null;
     };
     parentId: number | null;
-    createdAt: string;
+    createdAt: Date;
     _count: {
         reactions: number;
     };
@@ -33,6 +36,7 @@ type Post = {
         type: string;
         userId: number;
     }>;
+    attachments?: string[];
 };
 
 type Thread = {
@@ -107,7 +111,24 @@ export default function ThreadPage() {
         queryFn: async () => {
             const response = await fetch(`/api/courses/${params.code}/threads/${params.threadId}`);
             if (!response.ok) throw new Error('Failed to fetch thread');
-            return response.json();
+            const data = await response.json();
+
+            // Transform the data to match our Post type
+            const transformedData = {
+                ...data,
+                posts: data.posts.map((post: any) => ({
+                    ...post,
+                    threadId: data.id,
+                    authorId: post.author.id,
+                    createdAt: new Date(post.createdAt),
+                    author: {
+                        ...post.author,
+                        email: post.author.email || `${post.author.username}@example.com`, // Fallback email
+                    }
+                }))
+            };
+
+            return transformedData;
         },
     });
 

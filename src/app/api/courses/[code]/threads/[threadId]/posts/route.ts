@@ -13,9 +13,10 @@ const postSchema = z.object({
 
 export async function POST(
     req: Request,
-    { params }: { params: { code: string; threadId: string } }
+    { params }: { params: Promise<{ code: string; threadId: string }> }
 ) {
     try {
+        const { code, threadId } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -26,9 +27,9 @@ export async function POST(
 
         const thread = await db.thread.findFirst({
             where: {
-                id: parseInt(params.threadId),
+                id: parseInt(threadId),
                 course: {
-                    code: params.code,
+                    code: code,
                 },
             },
             select: { isLocked: true },
@@ -66,7 +67,7 @@ export async function POST(
             data: {
                 content,
                 parentId,
-                threadId: parseInt(params.threadId),
+                threadId: parseInt(threadId),
                 authorId: user.id,
                 attachments: attachments || [],
             },
@@ -92,9 +93,9 @@ export async function POST(
         // Get Socket.IO instance and emit event
         const io = getIO();
         if (io) {
-            io.to(`thread-${params.threadId}`).emit('new-post', post);
+            io.to(`thread-${threadId}`).emit('new-post', post);
         }
-        
+
         return NextResponse.json(post);
     } catch (error) {
         console.error('Error creating post:', error);

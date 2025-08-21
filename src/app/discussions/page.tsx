@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 
 type Thread = {
     id: number;

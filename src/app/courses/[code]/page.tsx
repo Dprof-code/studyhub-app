@@ -53,7 +53,7 @@ type Course = {
 export default function CoursePage() {
     const params = useParams();
     const router = useRouter();
-    const { data: session, status } = useSession();
+    const { data: session } = useSession();
     const [course, setCourse] = useState<Course | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isEditing, setIsEditing] = useState(false);

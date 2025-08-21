@@ -5,13 +5,14 @@ import { getServerSession } from 'next-auth';
 
 export async function GET(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
+        const { code } = await params;
         const threads = await db.thread.findMany({
             where: {
                 course: {
-                    code: params.code,
+                    code: code,
                 },
             },
             include: {
@@ -48,9 +49,10 @@ export async function GET(
 
 export async function POST(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
+        const { code } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -63,7 +65,7 @@ export async function POST(
         const { title, content } = body;
 
         const course = await db.course.findUnique({
-            where: { code: params.code },
+            where: { code: code },
         });
 
         if (!course) {

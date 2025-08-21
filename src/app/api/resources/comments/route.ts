@@ -12,12 +12,14 @@ const commentSchema = z.object({
 
 export async function GET(
   req: Request,
-  { params }: { params: { resourceId: string } }
+  { params }: { params: Promise<{ resourceId: string }> }
 ) {
   try {
+    const { resourceId } = await params;
+    const resourceIdParsed = parseInt(resourceId);
     const comments = await db.resourceComment.findMany({
       where: {
-        resourceId: parseInt(params.resourceId),
+        resourceId: resourceIdParsed,
         parentId: null, // Only fetch top-level comments
       },
       include: {

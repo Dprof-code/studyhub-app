@@ -1,15 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
+import io, { Socket } from 'socket.io-client';
 
 export function useSocket(threadId: number) {
-    const socketRef = useRef<Socket | null>(null);
+    const socketRef = useRef<typeof Socket | null>(null);
 
     useEffect(() => {
         // Initialize socket connection
         if (!socketRef.current) {
             socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || '', {
                 path: '/api/socketio',
-                addTrailingSlash: false,
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 5000,
                 timeout: 20000,
@@ -19,7 +18,7 @@ export function useSocket(threadId: number) {
                 console.log('Socket connected');
             });
 
-            socketRef.current.on('connect_error', (error) => {
+            socketRef.current.on('connect_error', (error: Error) => {
                 console.error('Socket connection error:', error);
             });
         }

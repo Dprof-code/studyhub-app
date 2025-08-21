@@ -1,6 +1,6 @@
 'use client';
 
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
@@ -11,10 +11,10 @@ type EditorProps = {
     onChange: (content: string) => void;
     content?: string;
     placeholder?: string;
-    onMount?: (editor: Editor) => void;
+    onMount?: (editor: TiptapEditor) => void;
 };
 
-const MenuBar = ({ editor }: { editor: any }) => {
+const MenuBar = ({ editor }: { editor: TiptapEditor | null }) => {
     if (!editor) return null;
 
     return (
@@ -86,7 +86,6 @@ export function Editor({ onChange, content = '', placeholder, onMount }: EditorP
             CodeBlock,
         ],
         content,
-        placeholder: placeholder || 'Start typing...',
         immediatelyRender: false,
         onUpdate: ({ editor }) => {
             onChange(editor.getHTML());
@@ -97,6 +96,7 @@ export function Editor({ onChange, content = '', placeholder, onMount }: EditorP
         editorProps: {
             attributes: {
                 class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] p-4',
+                'data-placeholder': placeholder || 'Start typing...',
             },
         },
     });

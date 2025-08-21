@@ -49,16 +49,16 @@ type ResourceDetails = {
     };
 };
 
-export default function ResourcePage({ params }: { params: { id: string } }) {
+export default function ResourcePage({ params }: { params: Promise<{ id: string }> }) {
     const { data: session } = useSession();
     const [currentPage, setCurrentPage] = useState(1);
 
+    // Unwrap params using React.use()
     const resolvedParams = use(params);
 
     const { data: resource, isLoading, error } = useQuery<ResourceDetails>({
         queryKey: ['resource', resolvedParams.id],
         queryFn: async () => {
-            //console.log('Fetching resource with ID:', resolvedParams.id);
             if (!resolvedParams.id) throw new Error('Resource ID is required');
 
             const response = await fetch(`/api/resources/${resolvedParams.id}`);
@@ -160,7 +160,6 @@ export default function ResourcePage({ params }: { params: { id: string } }) {
                                             <TooltipTrigger asChild>
                                                 <Button variant="ghost" size="sm">
                                                     <span className="material-symbols-outlined mr-1">thumb_up</span>
-                                                    {/* {resource._count.reactions.LIKE} */}
                                                 </Button>
                                             </TooltipTrigger>
                                             <TooltipContent>Like this resource</TooltipContent>
@@ -171,7 +170,6 @@ export default function ResourcePage({ params }: { params: { id: string } }) {
                                             <TooltipTrigger asChild>
                                                 <Button variant="ghost" size="sm">
                                                     <span className="material-symbols-outlined mr-1">thumb_down</span>
-                                                    {/* {resource._count.reactions.DISLIKE} */}
                                                 </Button>
                                             </TooltipTrigger>
                                             <TooltipContent>Dislike this resource</TooltipContent>

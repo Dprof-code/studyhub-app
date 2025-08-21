@@ -8,7 +8,15 @@ export async function GET(req: Request) {
         const sort = searchParams.get('sort') || 'recent';
 
         // Build where clause
-        const where: any = {};
+        const where: {
+            OR?: {
+                title?: { contains: string; mode: 'insensitive' };
+                course?: {
+                    code?: { contains: string; mode: 'insensitive' };
+                    title?: { contains: string; mode: 'insensitive' };
+                };
+            }[];
+        } = {};
         if (search) {
             where.OR = [
                 { title: { contains: search, mode: 'insensitive' } },
@@ -18,7 +26,7 @@ export async function GET(req: Request) {
         }
 
         // Build orderBy clause
-        let orderBy: any[] = [{ createdAt: 'desc' }];
+        let orderBy: { [key: string]: 'asc' | 'desc' | { _count: 'asc' | 'desc' } }[] = [{ createdAt: 'desc' }];
         if (sort === 'active') {
             orderBy = [{ posts: { _count: 'desc' } }];
         } else if (sort === 'popular') {

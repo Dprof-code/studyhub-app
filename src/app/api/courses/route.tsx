@@ -16,11 +16,20 @@ const courseSchema = z.object({
         name: z.string().min(2),
         id: z.number().optional()
     }),
-}).transform((data) => ({
-    ...data,
+}).transform((data) => {
     // Extract level from course code (e.g., CSC101 -> 100)
-    level: parseInt(data.code.match(/\d{3}/)[0].charAt(0)) * 100
-}));
+    const match = data.code.match(/\d{3}/);
+    if (!match) {
+        throw new Error('Invalid course code format');
+    }
+
+    const level = parseInt(match[0].charAt(0)) * 100;
+
+    return {
+        ...data,
+        level
+    };
+});
 
 export async function POST(req: Request) {
     try {

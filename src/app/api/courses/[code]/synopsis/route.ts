@@ -10,9 +10,10 @@ const synopsisSchema = z.object({
 
 export async function PATCH(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
+        const { code } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -23,7 +24,7 @@ export async function PATCH(
 
         // Get the course and user
         const course = await db.course.findUnique({
-            where: {  code: params.code },
+            where: { code: code },
         });
 
         if (!course) {
@@ -75,16 +76,17 @@ export async function PATCH(
 // Get synopsis history
 export async function GET(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
+        const { code } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const course = await db.course.findUnique({
-            where: { code: params.code },
+            where: { code: code },
             include: {
                 synopsisHistory: {
                     include: {

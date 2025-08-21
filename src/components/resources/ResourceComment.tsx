@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { toast } from 'sonner';
 
 type Comment = {
@@ -35,7 +35,7 @@ function CommentItem({ comment, level = 0, resourceId }: CommentProps) {
     const { data: session } = useSession();
     const queryClient = useQueryClient();
 
-    const { mutate: submitReply, isLoading: isSubmitting } = useMutation({
+    const { mutate: submitReply, isPending: isSubmitting } = useMutation({
         mutationFn: async () => {
             const response = await fetch('/api/resources/comments', {
                 method: 'POST',
@@ -43,7 +43,7 @@ function CommentItem({ comment, level = 0, resourceId }: CommentProps) {
                 body: JSON.stringify({
                     content: replyContent,
                     resourceId,
-                    parentId: comment.id,
+                    parentId: comment!.id,
                 }),
             });
             if (!response.ok) throw new Error('Failed to post reply');
@@ -52,13 +52,15 @@ function CommentItem({ comment, level = 0, resourceId }: CommentProps) {
         onSuccess: () => {
             setReplyContent('');
             setIsReplying(false);
-            queryClient.invalidateQueries(['resource-comments', resourceId]);
+            queryClient.invalidateQueries({ queryKey: ['resource-comments', resourceId] });
             toast.success('Reply posted successfully');
         },
         onError: () => {
             toast.error('Failed to post reply');
         },
     });
+
+    if (!comment) return null;
 
     return (
         <div className="space-y-4" style={{ marginLeft: `${level * 24}px` }}>
@@ -144,7 +146,7 @@ export function ResourceComment({ resourceId }: { resourceId: number }) {
         },
     });
 
-    const { mutate: submitComment, isLoading: isSubmitting } = useMutation({
+    const { mutate: submitComment, isPending: isSubmitting } = useMutation({
         mutationFn: async () => {
             const response = await fetch('/api/resources/comments', {
                 method: 'POST',
@@ -159,7 +161,7 @@ export function ResourceComment({ resourceId }: { resourceId: number }) {
         },
         onSuccess: () => {
             setContent('');
-            queryClient.invalidateQueries(['resource-comments', resourceId]);
+            queryClient.invalidateQueries({ queryKey: ['resource-comments', resourceId] });
             toast.success('Comment posted successfully');
         },
         onError: () => {

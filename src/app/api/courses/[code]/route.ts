@@ -11,7 +11,7 @@ const updateCourseSchema = z.object({
 
 export async function GET(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
         const { code } = await params;
@@ -66,18 +66,14 @@ export async function GET(
             );
         }
 
-        if (course) {
-            const transformedCourse = {
-                ...course,
-                threads: course.Thread, // Rename Thread to threads for frontend consistency
-            };
-            // Remove the original Thread property
-            delete transformedCourse.Thread;
+        // Use destructuring to exclude Thread
+        const { Thread, ...courseWithoutThread } = course;
+        const transformedCourse = {
+            ...courseWithoutThread,
+            threads: Thread,
+        };
 
-            return NextResponse.json(transformedCourse);
-        }
-
-        return NextResponse.json(course);
+        return NextResponse.json(transformedCourse);
     } catch (error) {
         console.error('Error fetching course:', error);
         return NextResponse.json(
@@ -89,10 +85,10 @@ export async function GET(
 
 export async function PATCH(
     req: Request,
-    { params }: { params: { code: string } }
+    { params }: { params: Promise<{ code: string }> }
 ) {
     try {
-        const { code } = params;
+        const { code } = await params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -135,23 +131,23 @@ export async function PATCH(
                         },
                     },
                 },
-            },
-            Thread: {
-                orderBy: [
-                    { isStickied: 'desc' },
-                    { createdAt: 'desc' }
-                ],
-                include: {
-                    author: {
-                        select: {
-                            firstname: true,
-                            lastname: true,
-                            avatarUrl: true,
+                Thread: {
+                    orderBy: [
+                        { isStickied: 'desc' },
+                        { createdAt: 'desc' }
+                    ],
+                    include: {
+                        author: {
+                            select: {
+                                firstname: true,
+                                lastname: true,
+                                avatarUrl: true,
+                            },
                         },
-                    },
-                    _count: {
-                        select: {
-                            posts: true,
+                        _count: {
+                            select: {
+                                posts: true,
+                            },
                         },
                     },
                 },

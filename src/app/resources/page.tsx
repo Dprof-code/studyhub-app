@@ -114,6 +114,7 @@ export default function ResourcesPage() {
     } = useInfiniteQuery({
         queryKey: ['resources', selectedTags, selectedTypes, selectedDepartments, selectedYears, searchQuery],
         queryFn: fetchResources,
+        initialPageParam: 0,
         getNextPageParam: (lastPage) =>
             lastPage.hasMore ? lastPage.nextCursor : undefined,
     });

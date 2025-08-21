@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner"
 import Provider from "@/components/Provider";
 import { Analytics } from "@vercel/analytics/next"
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 const inter = Inter({
   variable: "--font-inter",
@@ -33,6 +34,7 @@ export default function RootLayout({
         <Provider>{children}</Provider>
         <Toaster richColors />
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

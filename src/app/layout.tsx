@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner"
 import Provider from "@/components/Provider";
+import { Analytics } from "@vercel/analytics/next"
 
 const inter = Inter({
   variable: "--font-inter",
@@ -31,6 +32,7 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased`}>
         <Provider>{children}</Provider>
         <Toaster richColors />
+        <Analytics />
       </body>
     </html>
   );

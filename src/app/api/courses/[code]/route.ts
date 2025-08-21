@@ -14,8 +14,9 @@ export async function GET(
     { params }: { params: { code: string } }
 ) {
     try {
+        const { code } = await params;
         const course = await db.course.findUnique({
-            where: { code: params.code },
+            where: { code: code },
             include: {
                 department: {
                     include: {
@@ -91,6 +92,7 @@ export async function PATCH(
     { params }: { params: { code: string } }
 ) {
     try {
+        const { code } = params;
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json(
@@ -103,7 +105,7 @@ export async function PATCH(
         const { title, synopsis } = updateCourseSchema.parse(body);
 
         const course = await db.course.update({
-            where: { code: params.code },
+            where: { code: code },
             data: {
                 title,
                 synopsis,

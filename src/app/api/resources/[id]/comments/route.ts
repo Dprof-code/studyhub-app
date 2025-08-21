@@ -15,9 +15,11 @@ export async function GET(
     { params }: { params: { id: string } }
 ) {
     try {
+        const { id } = await params;
+        const resourceId = parseInt(id);
         const comments = await db.resourceComment.findMany({
             where: {
-                resourceId: parseInt(params.id),
+                resourceId: resourceId,
                 parentId: null, // Only fetch top-level comments
             },
             include: {

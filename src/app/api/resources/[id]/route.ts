@@ -6,7 +6,9 @@ export async function GET(
     { params }: { params: { id: string } }
 ) {
     try {
-        const resourceId = parseInt(params.id);
+        // const resourceId = parseInt(params.id);
+        const { id } = await params;
+        const resourceId = parseInt(id);
         if (isNaN(resourceId)) {
             return NextResponse.json(
                 { error: 'Invalid resource ID' },

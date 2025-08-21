@@ -6,11 +6,12 @@ export async function GET(
     { params }: { params: { code: string; threadId: string } }
 ) {
     try {
+        const { code, threadId } = await params;
         const thread = await db.thread.findFirst({
             where: {
-                id: parseInt(params.threadId),
+                id: parseInt(threadId),
                 course: {
-                    code: params.code,
+                    code: code,
                 },
             },
             include: {

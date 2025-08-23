@@ -172,7 +172,7 @@ export const authOptions: NextAuthOptions = {
                         const role = userCount === 0 ? 'ADMIN' : 'STUDENT';
 
                         // Generate a unique username
-                        let baseUsername = user.email!.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const baseUsername = user.email!.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
                         let username = baseUsername;
                         let counter = 1;
 

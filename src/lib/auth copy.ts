@@ -118,32 +118,25 @@ export const authOptions: NextAuthOptions = {
     ],
     callbacks: {
         async signIn({ user, account, profile }) {
-            console.log('🚀 SignIn callback triggered');
-            console.log('Provider:', account?.provider);
-            console.log('User email:', user.email);
-            console.log('Account:', account);
-            console.log('Profile:', profile);
-
             if (account?.provider === "google") {
                 try {
-                    console.log('🔍 Checking for existing user with email:', user.email);
-
                     // Check if user already exists
                     const existingUser = await db.user.findUnique({
-                        where: { email: user.email! },
-                        include: { credentials: true }
+                        where: { email: user.email! }
                     });
 
                     if (existingUser) {
-                        console.log('✅ User exists:', existingUser.email);
+                        // User exists, check if they have Google credentials
+                        const googleCredential = await db.credential.findUnique({
+                            where: {
+                                provider_providerId: {
+                                    provider: 'GOOGLE',
+                                    providerId: account.providerAccountId
+                                }
+                            }
+                        });
 
-                        // Check if they have Google credentials
-                        const hasGoogleCredential = existingUser.credentials.some(
-                            cred => cred.provider === 'GOOGLE' && cred.providerId === account.providerAccountId
-                        );
-
-                        if (!hasGoogleCredential) {
-                            console.log('🔗 Linking Google account to existing user');
+                        if (!googleCredential) {
                             // Link Google account to existing user
                             await db.credential.create({
                                 data: {
@@ -153,35 +146,11 @@ export const authOptions: NextAuthOptions = {
                                 }
                             });
                         }
-
-                        // Update the user object with database data
-                        user.id = `${existingUser.id}`;
-                        user.role = existingUser.role;
-                        user.username = existingUser.username;
-                        user.firstname = existingUser.firstname;
-                        user.lastname = existingUser.lastname;
-                        user.uid = existingUser.userId;
-
-                        console.log('✅ SignIn successful for existing user');
                         return true;
                     } else {
-                        console.log('👤 Creating new user for:', user.email);
-
                         // Check if this is first user (make admin)
                         const userCount = await db.user.count();
                         const role = userCount === 0 ? 'ADMIN' : 'STUDENT';
-
-                        // Generate a unique username
-                        let baseUsername = user.email!.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-                        let username = baseUsername;
-                        let counter = 1;
-
-                        while (await db.user.findUnique({ where: { username } })) {
-                            username = `${baseUsername}${counter}`;
-                            counter++;
-                        }
-
-                        console.log('📝 Creating user with username:', username);
 
                         // Create new user with Google credentials
                         const newUser = await db.user.create({
@@ -189,7 +158,7 @@ export const authOptions: NextAuthOptions = {
                                 email: user.email!,
                                 firstname: (profile as any)?.given_name || user.name?.split(' ')[0] || '',
                                 lastname: (profile as any)?.family_name || user.name?.split(' ').slice(1).join(' ') || '',
-                                username: username,
+                                username: user.email!.split('@')[0], // Generate username from email
                                 role: role,
                                 avatarUrl: user.image,
                                 credentials: {
@@ -201,8 +170,6 @@ export const authOptions: NextAuthOptions = {
                             }
                         });
 
-                        console.log('✅ New user created:', newUser.email, 'with role:', newUser.role);
-
                         // Update user object with new data
                         user.id = `${newUser.id}`;
                         user.role = newUser.role;
@@ -211,81 +178,56 @@ export const authOptions: NextAuthOptions = {
                         user.lastname = newUser.lastname;
                         user.uid = newUser.userId;
 
-                        console.log('✅ SignIn successful for new user');
                         return true;
                     }
                 } catch (error) {
-                    console.error('❌ Error during Google sign in:', error);
+                    console.error('Error during Google sign in:', error);
                     return false;
                 }
             }
-            console.log('✅ SignIn successful for credentials');
             return true;
         },
         async redirect({ url, baseUrl }) {
-            console.log('🔀 Redirect callback triggered');
-            console.log('URL:', url);
-            console.log('Base URL:', baseUrl);
-
-            // If it's a callback from OAuth, redirect to dashboard
+            // If it's a callback from OAuth, redirect to user profile
             if (url.startsWith(baseUrl + '/api/auth/callback')) {
-                console.log('🔄 OAuth callback redirect to dashboard');
-                return `${baseUrl}/dashboard`;
+                // We need to get the user's username from the database
+                // This will be handled in the jwt callback where we have access to the user data
+                return `${baseUrl}/dashboard`; // Temporarily go to dashboard, we'll redirect from there
             }
 
             // Handle sign-in redirects
             if (url.startsWith(baseUrl + '/api/auth/signin')) {
-                console.log('🔄 Sign-in redirect to dashboard');
                 return `${baseUrl}/dashboard`;
             }
 
             // For other redirects, use the provided URL or default to base URL
-            if (url.startsWith('/')) {
-                console.log('🔄 Relative URL redirect:', `${baseUrl}${url}`);
-                return `${baseUrl}${url}`;
-            }
-            if (new URL(url).origin === baseUrl) {
-                console.log('🔄 Same origin redirect:', url);
-                return url;
-            }
-            console.log('🔄 Default redirect to base URL');
+            if (url.startsWith('/')) return `${baseUrl}${url}`;
+            if (new URL(url).origin === baseUrl) return url;
             return baseUrl;
         },
         async jwt({ token, user }) {
-            console.log('🎫 JWT callback triggered');
-
             if (user) {
-                console.log('👤 User data in JWT:', user);
+                // Fetch user data from database to get complete info
+                const dbUser = await db.user.findUnique({
+                    where: { email: user.email! }
+                });
 
-                try {
-                    // Fetch user data from database to get complete info
-                    const dbUser = await db.user.findUnique({
-                        where: { email: user.email! }
-                    });
-
-                    if (dbUser) {
-                        console.log('📄 Database user found for JWT:', dbUser.username);
-                        return {
-                            ...token,
-                            username: dbUser.username,
-                            id: `${dbUser.id}`,
-                            uid: dbUser.userId,
-                            image: dbUser.avatarUrl,
-                            firstname: dbUser.firstname,
-                            lastname: dbUser.lastname,
-                            role: dbUser.role,
-                        };
-                    }
-                } catch (error) {
-                    console.error('❌ Error in JWT callback:', error);
+                if (dbUser) {
+                    return {
+                        ...token,
+                        username: dbUser.username,
+                        id: `${dbUser.id}`,
+                        uid: dbUser.userId,
+                        image: dbUser.avatarUrl,
+                        firstname: dbUser.firstname,
+                        lastname: dbUser.lastname,
+                        role: dbUser.role,
+                    };
                 }
             }
             return token;
         },
         async session({ session, token }) {
-            console.log('🗓️ Session callback triggered');
-            console.log('Token data:', { id: token.id, username: token.username, role: token.role });
-
             if (session.user) {
                 session.user.id = token.id as string;
                 session.user.username = (token.username as string) ?? undefined;
@@ -294,15 +236,8 @@ export const authOptions: NextAuthOptions = {
                 session.user.uid = (token.uid as string) ?? undefined;
                 session.user.role = (token.role as string) ?? undefined;
                 session.user.image = (token.image as string) ?? null;
-
-                console.log('📋 Final session user:', {
-                    id: session.user.id,
-                    username: session.user.username,
-                    role: session.user.role
-                });
             }
             return session;
         },
-    },
-    debug: true, // Enable debug mode
+    }
 };

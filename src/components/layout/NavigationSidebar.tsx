@@ -12,6 +12,7 @@ const menuItems = [
     { icon: 'groups', label: 'Study Groups', href: '/groups' },
     { icon: 'forum', label: 'Discussions', href: '/discussions' },
     { icon: 'emoji_events', label: 'Achievements', href: '/gamification' },
+    { icon: 'analytics', label: 'Learning Analytics', href: '/analytics' },
 ];
 
 export function NavigationSidebar({

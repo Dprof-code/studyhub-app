@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/dbconfig';
+import { awardActivityPoints } from '@/lib/gamification';
 import { z } from 'zod';
 
 const resourceSchema = z.object({
@@ -53,6 +54,16 @@ export async function POST(req: Request) {
                 year: data?.year,
             },
         });
+
+        // Award gamification points for resource upload
+        try {
+            await awardActivityPoints(user.id, 'RESOURCE_UPLOAD', {
+                resourceId: resource.id
+            });
+        } catch (gamificationError) {
+            console.error('Failed to award gamification points:', gamificationError);
+            // Don't fail the request if gamification fails
+        }
 
         return NextResponse.json(resource);
     } catch (error) {

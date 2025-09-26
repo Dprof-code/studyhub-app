@@ -3,6 +3,7 @@ import { authOptions } from '@/lib/auth';
 import { getServerSession } from 'next-auth/next';
 import Link from 'next/link';
 import { UserStatsDisplay, AchievementsDisplay } from '@/components/gamification';
+import { RecommendationAnalytics } from '@/components/recommendations/RecommendationAnalytics';
 
 const Profile = async () => {
     const session = await getServerSession(authOptions);
@@ -77,6 +78,12 @@ const Profile = async () => {
                                     View all achievements →
                                 </Link>
                             </div>
+                        </div>
+
+                        {/* Learning Analytics */}
+                        <div className="bg-white rounded-lg shadow p-6">
+                            <h2 className="text-xl font-semibold text-gray-900 mb-4">Learning Analytics</h2>
+                            <RecommendationAnalytics />
                         </div>
                     </div>
 

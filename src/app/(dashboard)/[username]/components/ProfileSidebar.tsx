@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { AnalyticsDashboardWidget } from '@/components/recommendations/AnalyticsDashboardWidget';
 
 type UserProfile = {
     bio: string | null;
@@ -42,6 +43,9 @@ export function ProfileSidebar({ username }: { username: string }) {
 
     return (
         <div className="space-y-6">
+            {/* AI Analytics Widget */}
+            <AnalyticsDashboardWidget />
+
             {/* Bio Section */}
             <div className="bg-card rounded-lg border border-border p-4">
                 <h2 className="font-semibold mb-2">About</h2>

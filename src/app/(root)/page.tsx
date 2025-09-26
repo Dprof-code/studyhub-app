@@ -58,10 +58,13 @@ export default function Home() {
                 Get Started
               </button>
             </Link>
-            <button className="btn-accent cta-secondary">
-              <span className="material-symbols-outlined">explore</span>
-              Explore Resources
-            </button>
+
+            <Link href="/resources">
+              <button className="btn-accent cta-secondary">
+                <span className="material-symbols-outlined">explore</span>
+                Explore Resources
+              </button>
+            </Link>
           </div>
         </div>
 

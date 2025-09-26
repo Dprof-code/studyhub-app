@@ -6,8 +6,12 @@ const menuItems = [
     { icon: 'home', label: 'Home', href: '/home' },
     { icon: 'school', label: 'Courses', href: '/courses' },
     { icon: 'library_books', label: 'Resources', href: '/resources' },
+    { icon: 'group', label: 'Find Study Buddies', href: '/matches/request' },
+    { icon: 'search', label: 'Browse Available', href: '/matches/browse' },
+    { icon: 'diversity_3', label: 'My Matches', href: '/matches/my-matches' },
     { icon: 'groups', label: 'Study Groups', href: '/groups' },
     { icon: 'forum', label: 'Discussions', href: '/discussions' },
+    { icon: 'emoji_events', label: 'Achievements', href: '/gamification' },
 ];
 
 export function NavigationSidebar({

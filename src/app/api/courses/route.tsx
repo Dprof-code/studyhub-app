@@ -124,10 +124,20 @@ export async function POST(req: Request) {
 
 export async function GET(request: Request) {
     try {
+        const session = await getServerSession(authOptions);
         const { searchParams } = new URL(request.url);
         const search = searchParams.get('search');
         const department = searchParams.get('department');
         const level = searchParams.get('level');
+
+        // Get current user if logged in
+        let currentUser = null;
+        if (session?.user) {
+            currentUser = await db.user.findUnique({
+                where: { email: session.user.email! },
+                select: { id: true }
+            });
+        }
 
         const courses = await db.course.findMany({
             where: {
@@ -155,6 +165,25 @@ export async function GET(request: Request) {
                         code: true,
                     },
                 },
+                _count: {
+                    select: {
+                        resources: true,
+                        enrollments: {
+                            where: {
+                                status: 'ACTIVE'
+                            }
+                        }
+                    }
+                },
+                enrollments: currentUser ? {
+                    where: {
+                        userId: currentUser.id
+                    },
+                    select: {
+                        status: true,
+                        isAutoEnrolled: true
+                    }
+                } : false
             },
             orderBy: [
                 { level: 'asc' },
@@ -162,7 +191,19 @@ export async function GET(request: Request) {
             ],
         });
 
-        return NextResponse.json(courses);
+        // Transform the data to include enrollment status
+        const transformedCourses = courses.map(course => ({
+            ...course,
+            studentCount: course._count.enrollments,
+            resourceCount: course._count.resources,
+            isEnrolled: course.enrollments && course.enrollments.length > 0,
+            enrollmentStatus: course.enrollments?.[0]?.status || null,
+            isAutoEnrolled: course.enrollments?.[0]?.isAutoEnrolled || false,
+            enrollments: undefined, // Remove from response
+            _count: undefined // Remove from response
+        }));
+
+        return NextResponse.json(transformedCourses);
     } catch (error) {
         console.error('Error fetching courses:', error);
         return NextResponse.json(

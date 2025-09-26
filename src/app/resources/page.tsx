@@ -15,6 +15,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { ContentVoting } from '@/components/gamification';
+import { TrackPageView } from '@/components/gamification/ActivityTracker';
 import Link from 'next/link';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -136,6 +138,7 @@ export default function ResourcesPage() {
 
     return (
         <div className="min-h-screen bg-background">
+            <TrackPageView page="resources" delay={2000} />
             <div className="container mx-auto px-4 py-8">
                 <div className="flex gap-6">
                     {/* Filters Sidebar */}
@@ -278,46 +281,59 @@ export default function ResourcesPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {data?.pages.map((page) =>
                                     page.resources.map((resource: Resource, idx: number) => (
-                                        <Link key={resource.id} href={`/resources/${resource.id}`}>
-                                            <div
-                                                ref={idx === page.resources.length - 1 ? ref : null}
-                                                className="bg-card rounded-lg shadow-sm hover:shadow-md transition-shadow"
-                                            >
-                                                <div className="aspect-video relative overflow-hidden rounded-t-lg">
-                                                    <img
-                                                        src={getThumbnail(resource.fileType, resource.fileUrl)}
-                                                        alt={resource.title}
-                                                        className="object-cover w-full h-full"
-                                                    />
-                                                </div>
-                                                <div className="p-4">
-                                                    <h3 className="font-semibold mb-2 line-clamp-2">
-                                                        {resource.title}
-                                                    </h3>
-                                                    <div className="flex flex-wrap gap-1 mb-3">
-                                                        {resource.tags.map((tag) => (
-                                                            <Badge key={tag.id} variant="secondary">
-                                                                {tag.name}
-                                                            </Badge>
-                                                        ))}
+                                        <div key={resource.id}>
+                                            <Link href={`/resources/${resource.id}`}>
+                                                <div
+                                                    ref={idx === page.resources.length - 1 ? ref : null}
+                                                    className="bg-card rounded-lg shadow-sm hover:shadow-md transition-shadow"
+                                                >
+                                                    <div className="aspect-video relative overflow-hidden rounded-t-lg">
+                                                        <img
+                                                            src={getThumbnail(resource.fileType, resource.fileUrl)}
+                                                            alt={resource.title}
+                                                            className="object-cover w-full h-full"
+                                                        />
                                                     </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <Avatar
-                                                                src={resource.uploader.avatarUrl || '/avatar.jpg'}
-                                                                alt={resource.uploader.username}
-                                                            />
-                                                            <span className="text-sm text-muted-foreground">
-                                                                {resource.uploader.firstname} {resource.uploader.lastname}
+                                                    <div className="p-4">
+                                                        <h3 className="font-semibold mb-2 line-clamp-2">
+                                                            {resource.title}
+                                                        </h3>
+                                                        <div className="flex flex-wrap gap-1 mb-3">
+                                                            {resource.tags.map((tag) => (
+                                                                <Badge key={tag.id} variant="secondary">
+                                                                    {tag.name}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <Avatar
+                                                                    src={resource.uploader.avatarUrl || '/avatar.jpg'}
+                                                                    alt={resource.uploader.username}
+                                                                />
+                                                                <span className="text-sm text-muted-foreground">
+                                                                    {resource.uploader.firstname} {resource.uploader.lastname}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {new Date(resource.createdAt).toLocaleDateString()}
                                                             </span>
                                                         </div>
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {new Date(resource.createdAt).toLocaleDateString()}
-                                                        </span>
                                                     </div>
                                                 </div>
+                                            </Link>
+                                            {/* Voting Section - Outside the Link */}
+                                            <div className="px-4 pb-4 bg-card rounded-b-lg -mt-4 relative z-10">
+                                                <div className="border-t pt-3">
+                                                    <ContentVoting
+                                                        contentId={resource.id}
+                                                        contentType="resource"
+                                                        size="sm"
+                                                        showDetails={false}
+                                                    />
+                                                </div>
                                             </div>
-                                        </Link>
+                                        </div>
                                     ))
                                 )}
                             </div>

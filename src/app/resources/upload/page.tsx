@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { useGamification } from '@/hooks/useGamification';
 
 // Define allowed file types
 const ACCEPTED_FILE_TYPES = {
@@ -57,6 +58,7 @@ export default function UploadResources() {
             router.push('/sign-in');
         },
     });
+    const { recordActivity } = useGamification();
 
     const [file, setFile] = useState<File | null>(null);
     const [uploadProgress, setUploadProgress] = useState(0);
@@ -177,7 +179,15 @@ export default function UploadResources() {
             }
 
             const resource = await response.json();
-            toast.success('Resource uploaded successfully');
+
+            // Record activity for gamification
+            await recordActivity('RESOURCE_UPLOAD', {
+                resourceId: resource.id,
+                resourceType: resource.fileType,
+                tags: selectedTags
+            });
+
+            toast.success('Resource uploaded successfully! +20 XP earned');
             router.push(`/resources/${resource.id}`);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Failed to upload resource');

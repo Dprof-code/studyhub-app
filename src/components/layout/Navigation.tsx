@@ -9,6 +9,7 @@ import { NavigationSidebar } from './NavigationSidebar';
 import { UserMenu } from './UserMenu';
 import { CreateMenu } from './CreateMenu';
 import { Search } from './Search';
+import { GamificationWidget } from '@/components/gamification';
 
 export function Navigation() {
     const { data: session } = useSession();
@@ -44,6 +45,11 @@ export function Navigation() {
 
                     {session ? (
                         <>
+                            {/* Gamification Quick Stats */}
+                            <div className="hidden lg:block">
+                                <GamificationWidget type="quick-stats" />
+                            </div>
+
                             <CreateMenu />
                             <UserMenu user={session.user} />
                         </>

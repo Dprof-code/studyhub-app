@@ -3,6 +3,7 @@ import { db } from "@/lib/dbconfig";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { autoEnrollUserBasedOnProfile } from "@/lib/enrollment";
 
 const profileUpdateSchema = z.object({
     firstname: z.string().min(2),
@@ -74,6 +75,31 @@ export async function PATCH(req: Request) {
             });
         }
 
+        // Get the user's current profile to check if this is a first-time profile completion
+        const currentUser = await db.user.findUnique({
+            where: { email: session.user.email! },
+            select: {
+                id: true,
+                level: true,
+                departmentId: true,
+                enrollments: {
+                    where: {
+                        status: 'ACTIVE'
+                    },
+                    select: {
+                        id: true
+                    }
+                }
+            }
+        });
+
+        if (!currentUser) {
+            return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        }
+
+        const isFirstTimeProfileCompletion = !currentUser.level || !currentUser.departmentId;
+        const hasNoEnrollments = currentUser.enrollments.length === 0;
+
         // Update user profile
         const updatedUser = await db.user.update({
             where: { email: session.user.email! },
@@ -95,9 +121,21 @@ export async function PATCH(req: Request) {
             },
         });
 
+        // Auto-enroll user if this is their first time completing profile AND they have no enrollments
+        let autoEnrollmentResult = null;
+        if (isFirstTimeProfileCompletion && hasNoEnrollments && validatedData.level) {
+            try {
+                autoEnrollmentResult = await autoEnrollUserBasedOnProfile(currentUser.id);
+            } catch (error) {
+                console.error('Error during auto-enrollment:', error);
+                // Don't fail the profile update if auto-enrollment fails
+            }
+        }
+
         return NextResponse.json({
             message: 'Profile updated successfully',
             user: updatedUser,
+            autoEnrollment: autoEnrollmentResult
         });
     } catch (error) {
         console.error('Error updating profile:', error);

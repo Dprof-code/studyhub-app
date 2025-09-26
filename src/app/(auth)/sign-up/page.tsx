@@ -8,7 +8,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
-import { RoleSelectionModal } from '@/components/auth/RoleSelectionModal';
+
+// import { RoleSelectionModal } from '@/components/auth/RoleSelectionModal';
 
 const signUpSchema = z.object({
   firstName: z
@@ -54,7 +55,7 @@ const SignUp = () => {
   const [activeTab, setActiveTab] = useState<'student' | 'lecturer'>('student');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
-  const [googleEmail, setGoogleEmail] = useState('');
+  // const [googleEmail, setGoogleEmail] = useState('');
 
   // Check if Google OAuth is available
   const isGoogleEnabled = process.env.NEXT_PUBLIC_GOOGLE_ENABLED === 'true';
@@ -375,11 +376,11 @@ const SignUp = () => {
       </div>
 
       {/* Role Selection Modal */}
-      <RoleSelectionModal
+      {/* <RoleSelectionModal
         isOpen={showRoleModal}
         email={googleEmail}
         onClose={() => setShowRoleModal(false)}
-      />
+      /> */}
     </div>
   );
 };

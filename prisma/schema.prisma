@@ -52,11 +52,15 @@ model User {
   email        String      @unique
   firstname    String
   lastname     String
+  name         String? // Combined display name
   username     String      @unique
   avatarUrl    String?
+  avatar       String? // Alternative avatar field
   bio          String?
   role         UserRole    @default(STUDENT)
   level        Int?
+  year         Int? // Academic year
+  gender       String? // For matching preferences
   department   Department? @relation(fields: [departmentId], references: [id])
   departmentId Int?
   faculty      Faculty?    @relation(fields: [facultyId], references: [id])
@@ -74,6 +78,26 @@ model User {
   Report           Report[]
   ModerationAction ModerationAction[]
   ResourceComment  ResourceComment[]
+
+  // Peer Matching & Chat
+  matchRequests   MatchRequest[]
+  sentMatches     Match[]        @relation("UserMatches")
+  receivedMatches Match[]        @relation("MatchedUserMatches")
+  chatRooms       ChatRoom[]     @relation("ChatParticipants")
+  chatMessages    ChatMessage[]
+  lastSeen        DateTime?
+
+  // Gamification Relations
+  stats                UserStats?
+  activityLogs         ActivityLog[]
+  userAchievements     UserAchievement[]
+  contentVotes         ContentVote[]
+  leaderboardEntries   LeaderboardEntry[]
+  challengeCompletions DailyChallengeCompletion[]
+  badges               UserBadge[]
+
+  // Course Enrollment
+  enrollments Enrollment[]
 }
 
 model Credential {
@@ -96,6 +120,9 @@ model Department {
   users     User[]
   faculty   Faculty  @relation(fields: [facultyId], references: [id])
   facultyId Int
+
+  // Gamification Relations
+  leaderboardEntries LeaderboardEntry[]
 
   createdAt DateTime @default(now())
 }
@@ -123,6 +150,7 @@ model Course {
   resources       Resource[]
   synopsisHistory CourseSynopsisHistory[]
   Thread          Thread[]
+  enrollments     Enrollment[]
 }
 
 model CourseSynopsisHistory {
@@ -136,6 +164,33 @@ model CourseSynopsisHistory {
 
   @@index([courseId])
   @@index([userId])
+}
+
+// ───────────── Course Enrollment ─────────────
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+  PENDING
+}
+
+model Enrollment {
+  id             Int              @id @default(autoincrement())
+  userId         Int
+  courseId       Int
+  status         EnrollmentStatus @default(ACTIVE)
+  enrolledAt     DateTime         @default(now())
+  completedAt    DateTime?
+  grade          String? // Final grade if completed
+  isAutoEnrolled Boolean          @default(false) // Track if auto-enrolled
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId]) // Prevent duplicate enrollments
+  @@index([userId])
+  @@index([courseId])
+  @@index([status])
 }
 
 // ───────────── Resource Repository ─────────────
@@ -155,6 +210,9 @@ model Resource {
   createdAt   DateTime          @default(now())
   Report      Report[]
   comments    ResourceComment[]
+
+  // Gamification Relations
+  votes ContentVote[]
 }
 
 model Tag {
@@ -174,6 +232,9 @@ model ResourceComment {
   parent     ResourceComment?  @relation("CommentReplies", fields: [parentId], references: [id])
   replies    ResourceComment[] @relation("CommentReplies")
   createdAt  DateTime          @default(now())
+
+  // Gamification Relations
+  votes ContentVote[]
 
   @@index([resourceId])
   @@index([authorId])
@@ -208,6 +269,9 @@ model Post {
   reactions Reaction[]
   reports   Report[]
   createdAt DateTime   @default(now())
+
+  // Gamification Relations
+  votes ContentVote[]
 }
 
 model Reaction {
@@ -247,4 +311,422 @@ model ModerationAction {
   action      ModActionType
   note        String?
   createdAt   DateTime      @default(now())
+}
+
+// ───────────── Peer Matching & Chat ─────────────
+enum MatchRequestStatus {
+  active
+  matched
+  cancelled
+  expired
+}
+
+enum MatchStatus {
+  pending
+  connected
+  declined
+}
+
+enum StudyFormat {
+  online
+  in_person
+  hybrid
+}
+
+enum StudyLevel {
+  beginner
+  intermediate
+  advanced
+}
+
+enum PreferredGender {
+  any
+  same
+  opposite
+}
+
+enum ChatRoomType {
+  direct
+  group
+}
+
+enum MessageType {
+  text
+  image
+  file
+}
+
+model MatchRequest {
+  id                 String             @id @default(uuid())
+  userId             Int
+  user               User               @relation(fields: [userId], references: [id])
+  subjects           String[] // Array of selected topics/subjects
+  availability       String[] // Array of time slots
+  studyFormat        StudyFormat
+  maxGroupSize       Int                @default(4)
+  studyLevel         StudyLevel
+  preferredGender    PreferredGender    @default(any)
+  locationPreference String?
+  additionalNotes    String?
+  stayAvailable      Boolean            @default(false) // Whether user wants to stay available for matching
+  status             MatchRequestStatus @default(active)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([studyFormat])
+}
+
+model Match {
+  id            String      @id @default(uuid())
+  userId        Int // Person who sent the connect request
+  user          User        @relation("UserMatches", fields: [userId], references: [id])
+  matchedUserId Int // Person who received the connect request
+  matchedUser   User        @relation("MatchedUserMatches", fields: [matchedUserId], references: [id])
+  status        MatchStatus @default(pending)
+  message       String? // Optional message when connecting
+  chatRoomId    String?
+  chatRoom      ChatRoom?   @relation(fields: [chatRoomId], references: [id])
+  connectedAt   DateTime? // When both users connected
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([userId, matchedUserId])
+  @@index([userId])
+  @@index([matchedUserId])
+  @@index([status])
+}
+
+model ChatRoom {
+  id           String        @id @default(uuid())
+  name         String? // Display name for the chat
+  type         ChatRoomType  @default(direct)
+  members      User[]        @relation("ChatParticipants")
+  messages     ChatMessage[]
+  matches      Match[]
+  lastActivity DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([type])
+  @@index([lastActivity])
+}
+
+model ChatMessage {
+  id          String           @id @default(uuid())
+  content     String           @db.Text
+  type        MessageType      @default(text)
+  senderId    Int
+  sender      User             @relation(fields: [senderId], references: [id])
+  chatRoomId  String
+  chatRoom    ChatRoom         @relation(fields: [chatRoomId], references: [id])
+  attachments ChatAttachment[]
+  createdAt   DateTime         @default(now())
+
+  @@index([chatRoomId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model ChatAttachment {
+  id        String      @id @default(uuid())
+  name      String
+  url       String
+  type      String // MIME type
+  size      Int // File size in bytes
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id])
+  createdAt DateTime    @default(now())
+
+  @@index([messageId])
+}
+
+// ───────────── Gamification & Reputation System ─────────────
+
+// Points & Experience System
+enum ActivityType {
+  RESOURCE_UPLOAD
+  COURSE_CREATION
+  COMMENT_HELPFUL
+  DISCUSSION_PARTICIPATION
+  UPVOTE_RECEIVED
+  EXPERT_ENDORSEMENT
+  DAILY_LOGIN
+  THREAD_CREATION
+  POST_CREATION
+  RESOURCE_COMMENT
+  PEER_HELP
+  QUALITY_CONTRIBUTION
+}
+
+enum AchievementCategory {
+  LEARNING
+  SOCIAL
+  QUALITY
+  CONSISTENCY
+  MILESTONE
+  SEASONAL
+}
+
+enum AchievementTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  LEGENDARY
+}
+
+enum VoteType {
+  UPVOTE
+  HELPFUL
+  EXPERT_APPROVAL
+  QUALITY_CONTENT
+}
+
+enum ReputationTier {
+  NEWCOMER // 0-50
+  CONTRIBUTOR // 51-200  
+  VALUED_MEMBER // 201-500
+  COMMUNITY_LEADER // 501-1000
+  EXPERT_CONTRIBUTOR // 1000+
+}
+
+model UserStats {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Core Stats
+  totalXP         Int            @default(0)
+  reputationScore Int            @default(0)
+  currentLevel    Int            @default(1)
+  reputationTier  ReputationTier @default(NEWCOMER)
+
+  // Activity Counters
+  resourceUploads    Int @default(0)
+  threadsCreated     Int @default(0)
+  postsCreated       Int @default(0)
+  commentsCreated    Int @default(0)
+  upvotesReceived    Int @default(0)
+  expertEndorsements Int @default(0)
+
+  // Quality Metrics
+  averageContentRating Float @default(0.0)
+  helpfulVotes         Int   @default(0)
+  qualityScore         Int   @default(0)
+
+  // Engagement Metrics
+  loginStreak        Int       @default(0)
+  longestLoginStreak Int       @default(0)
+  lastLoginDate      DateTime?
+  totalLoginDays     Int       @default(0)
+
+  // Social Metrics
+  peersHelped        Int @default(0)
+  mentorshipPoints   Int @default(0)
+  collaborationScore Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reputationScore])
+  @@index([currentLevel])
+  @@index([reputationTier])
+}
+
+model ActivityLog {
+  id               Int          @id @default(autoincrement())
+  userId           Int
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activityType     ActivityType
+  xpGained         Int          @default(0)
+  reputationGained Int          @default(0)
+  description      String?
+
+  // Context References
+  resourceId   Int?
+  threadId     Int?
+  postId       Int?
+  targetUserId Int? // For peer interactions
+
+  metadata  Json? // Additional activity context
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([activityType])
+  @@index([createdAt])
+}
+
+model Achievement {
+  id               Int                 @id @default(autoincrement())
+  name             String              @unique
+  description      String
+  category         AchievementCategory
+  tier             AchievementTier     @default(BRONZE)
+  iconUrl          String?
+  xpReward         Int                 @default(0)
+  reputationReward Int                 @default(0)
+
+  // Unlock Conditions
+  requiredActions Json // Flexible condition system
+  isActive        Boolean   @default(true)
+  isSecret        Boolean   @default(false) // Hidden until unlocked
+  isSeasonal      Boolean   @default(false)
+  seasonStartDate DateTime?
+  seasonEndDate   DateTime?
+
+  // Progressive Achievement Support
+  parentId Int? // For multi-tier achievements
+  parent   Achievement?  @relation("AchievementProgression", fields: [parentId], references: [id])
+  children Achievement[] @relation("AchievementProgression")
+
+  userAchievements UserAchievement[]
+  createdAt        DateTime          @default(now())
+
+  @@index([category])
+  @@index([tier])
+  @@index([isActive])
+}
+
+model UserAchievement {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId Int
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  progress      Float       @default(0.0) // 0.0 to 1.0 for partial progress
+  unlockedAt    DateTime? // null if still in progress
+  createdAt     DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@index([unlockedAt])
+}
+
+model ContentVote {
+  id         Int      @id @default(autoincrement())
+  voterId    Int
+  voter      User     @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  voteType   VoteType
+  voteWeight Int      @default(1) // Based on voter's reputation
+
+  // Content References (one of these will be set)
+  resourceId Int?
+  resource   Resource?        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  postId     Int?
+  post       Post?            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId  Int?
+  comment    ResourceComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([voterId, resourceId, voteType])
+  @@unique([voterId, postId, voteType])
+  @@unique([voterId, commentId, voteType])
+  @@index([voterId])
+  @@index([voteType])
+}
+
+model LeaderboardEntry {
+  id           Int         @id @default(autoincrement())
+  userId       Int
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category     String // 'overall', 'weekly', 'monthly', 'department', etc.
+  period       String // 'current', '2024-09', 'all-time', etc.
+  score        Int
+  rank         Int
+  departmentId Int?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  // Metadata
+  calculatedAt DateTime @default(now())
+
+  @@unique([userId, category, period])
+  @@index([category, period, rank])
+  @@index([departmentId])
+}
+
+model DailyChallenge {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  targetDate  DateTime @unique // Date this challenge is for
+
+  // Challenge Requirements
+  requiredActivity ActivityType
+  targetCount      Int          @default(1)
+  xpReward         Int          @default(5)
+  reputationReward Int          @default(2)
+
+  // Challenge Status
+  isActive Boolean @default(true)
+
+  completions DailyChallengeCompletion[]
+  createdAt   DateTime                   @default(now())
+
+  @@index([targetDate])
+  @@index([isActive])
+}
+
+model DailyChallengeCompletion {
+  id          Int            @id @default(autoincrement())
+  userId      Int
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengeId Int
+  challenge   DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  completedAt DateTime       @default(now())
+
+  @@unique([userId, challengeId])
+  @@index([userId])
+  @@index([completedAt])
+}
+
+// Enhanced Badge System (extends existing concept)
+enum BadgeType {
+  MERIT
+  ROLE
+  EXPERT
+  ACHIEVEMENT // New: Achievement-based badges
+  SEASONAL // New: Time-limited badges
+}
+
+model Badge {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String
+  type        BadgeType
+  iconUrl     String?
+  color       String? // Hex color for badge display
+
+  // Requirements
+  requiredLevel        Int?
+  requiredReputation   Int?
+  requiredAchievements String[] // Achievement IDs needed
+
+  // Status
+  isActive   Boolean @default(true)
+  isRare     Boolean @default(false)
+  maxHolders Int? // Limit total badge holders
+
+  userBadges UserBadge[]
+  createdAt  DateTime    @default(now())
+
+  @@index([type])
+  @@index([isActive])
+}
+
+model UserBadge {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badgeId   Int
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  awardedBy Int? // Who awarded this badge (for role badges)
+  awardedAt DateTime @default(now())
+  isVisible Boolean  @default(true) // User can choose to hide badges
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([awardedAt])
 }

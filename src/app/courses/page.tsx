@@ -36,7 +36,7 @@ export default function Courses() {
     },
   });
 
-  const { data: courses = [], isLoading } = useQuery<Course[]>({
+  const { data: courses = [], isLoading, refetch } = useQuery<Course[]>({
     queryKey: ['courses', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -107,11 +107,20 @@ export default function Courses() {
                 {courses.map((course: any) => (
                   <CourseCard
                     key={course.id}
+                    id={course.id}
                     code={course.code}
                     title={course.title}
                     synopsis={course.synopsis}
                     department={course.department.name}
                     level={course.level}
+                    isEnrolled={course.isEnrolled}
+                    enrollmentStatus={course.enrollmentStatus}
+                    studentCount={course.studentCount}
+                    resourceCount={course.resourceCount}
+                    onEnrollmentChange={() => {
+                      // Refetch courses when enrollment changes
+                      refetch();
+                    }}
                   />
                 ))}
               </div>

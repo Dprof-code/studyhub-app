@@ -15,6 +15,8 @@ import {
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
+import { ContentVoting } from '@/components/gamification'
+import { TrackPageView } from '@/components/gamification/ActivityTracker';
 
 type Thread = {
     id: number;
@@ -71,6 +73,7 @@ export default function DiscussionsPage() {
 
     return (
         <div className="min-h-screen bg-background">
+            <TrackPageView page="discussions" delay={2500} />
             <div className="container mx-auto px-4 py-8">
                 {/* Header */}
                 <div className="mb-8">
@@ -120,7 +123,7 @@ export default function DiscussionsPage() {
                                 onClick={() => router.push(`/courses/${thread.course.code}/discussions/${thread.id}`)}
                             >
                                 <div className="flex items-start justify-between">
-                                    <div className="space-y-2">
+                                    <div className="space-y-2 flex-1">
                                         <div className="flex items-center gap-2">
                                             <Badge variant="outline">
                                                 {thread.course.code}
@@ -150,9 +153,19 @@ export default function DiscussionsPage() {
                                                 {thread._count.posts} replies
                                             </div>
                                         </div>
+
+                                        {/* Voting Section */}
+                                        <div className="pt-3 border-t" onClick={(e) => e.stopPropagation()}>
+                                            <ContentVoting
+                                                contentId={thread.id}
+                                                contentType="post"
+                                                size="sm"
+                                                showDetails={false}
+                                            />
+                                        </div>
                                     </div>
                                     {thread.lastPost && (
-                                        <div className="text-sm text-muted-foreground">
+                                        <div className="text-sm text-muted-foreground ml-6">
                                             <div>Last reply by {thread.lastPost.author.firstname}</div>
                                             <div>{formatDistanceToNow(new Date(thread.lastPost.createdAt), { addSuffix: true })}</div>
                                         </div>

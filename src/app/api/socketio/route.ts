@@ -1,23 +1,36 @@
-import { NextRequest } from 'next/server';
-import { headers } from 'next/headers';
-import { getIO } from '@/lib/socketio';
+import { NextRequest, NextResponse } from 'next/server';
+import { Server as HTTPServer } from 'http';
+import { initIO, getIO } from '@/lib/socketio';
 
 export async function GET(req: NextRequest) {
-    const io = getIO();
+    console.log('🌐 Socket.IO API route accessed');
+
+    // Try to get existing instance or initialize if needed
+    let io = getIO();
 
     if (!io) {
-        return new Response('Socket.IO not initialized', { status: 500 });
+        console.log('⚠️ Socket.IO not found, attempting to access global instance...');
+
+        // Check if it's available globally
+        if (globalThis.__socketio) {
+            console.log('✅ Found global Socket.IO instance');
+            io = globalThis.__socketio;
+        } else {
+            console.log('❌ No Socket.IO instance available');
+            return NextResponse.json(
+                { error: 'Socket.IO not initialized' },
+                { status: 500 }
+            );
+        }
     }
 
-    // Handle Socket.IO upgrade
-    const headersList = await headers();
-    const upgrade = headersList.get('upgrade');
+    console.log('✅ Socket.IO instance available:', !!io);
 
-    if (upgrade && upgrade.toLowerCase() === 'websocket') {
-        return new Response(null, { status: 101 });
-    }
-
-    return new Response('Socket.IO server running');
+    return NextResponse.json({
+        status: 'Socket.IO server running',
+        connected: !!io,
+        clientsCount: io ? io.sockets.sockets.size : 0
+    });
 }
 
 export const dynamic = 'force-dynamic';

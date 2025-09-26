@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 type UserProfile = {
     bio: string | null;
@@ -69,6 +70,43 @@ export function ProfileSidebar({ username }: { username: string }) {
                             <span>{profile.department.name}</span>
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Study Buddies Section */}
+            <div className="bg-card rounded-lg border border-border p-4">
+                <h2 className="font-semibold mb-4">Study Buddies</h2>
+                <div className="space-y-3">
+                    <Link
+                        href="/matches/request"
+                        className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 hover:bg-primary/10 transition-colors border border-primary/20"
+                    >
+                        <span className="material-symbols-outlined text-primary">group_add</span>
+                        <div className="flex-1">
+                            <div className="font-medium text-sm">Find Study Buddies</div>
+                            <div className="text-xs text-muted-foreground">Connect with peers</div>
+                        </div>
+                    </Link>
+                    <Link
+                        href="/matches/browse"
+                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-muted-foreground">search</span>
+                        <div className="flex-1">
+                            <div className="font-medium text-sm">Browse Available</div>
+                            <div className="text-xs text-muted-foreground">Find active students</div>
+                        </div>
+                    </Link>
+                    <Link
+                        href="/matches/results"
+                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-muted-foreground">diversity_3</span>
+                        <div className="flex-1">
+                            <div className="font-medium text-sm">Your Matches</div>
+                            <div className="text-xs text-muted-foreground">View connections</div>
+                        </div>
+                    </Link>
                 </div>
             </div>
 

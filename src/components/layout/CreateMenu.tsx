@@ -27,6 +27,14 @@ export function CreateMenu() {
                     <div className="absolute right-0 mt-2 w-56 rounded-lg border border-border bg-card shadow-lg z-50">
                         <nav className="p-2">
                             <Link
+                                href="/matches/request"
+                                className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted"
+                                onClick={() => setIsOpen(false)}
+                            >
+                                <span className="material-symbols-outlined">group_add</span>
+                                Find Study Buddy
+                            </Link>
+                            <Link
                                 href="/courses/new"
                                 className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted"
                                 onClick={() => setIsOpen(false)}

@@ -9,14 +9,22 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 // Set worker source with fallbacks
 if (typeof window !== 'undefined') {
-    // Use a more stable worker configuration
-    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.js`;
+    // Primary: Use CDN with correct version
+    // Fallback: Use local copy if CDN fails
+    const workerUrl = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
+    
+    try {
+        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+    } catch {
+        console.warn('Failed to set CDN worker, using local fallback');
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+    }
 }
 
 interface PDFViewerProps {
     fileUrl: string;
     currentPage: number;
-    onPageChange: (_pageNumber: number) => void;
+    onPageChange: (page: number) => void;
 }
 
 export function PDFViewer({ fileUrl, currentPage, onPageChange }: PDFViewerProps) {

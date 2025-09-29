@@ -7,15 +7,16 @@ import { Separator } from '@/components/ui/separator';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Set worker source
-//pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
-
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+// Set worker source with fallbacks
+if (typeof window !== 'undefined') {
+    // Use a more stable worker configuration
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.js`;
+}
 
 interface PDFViewerProps {
     fileUrl: string;
     currentPage: number;
-    onPageChange: (page: number) => void;
+    onPageChange: (_pageNumber: number) => void;
 }
 
 export function PDFViewer({ fileUrl, currentPage, onPageChange }: PDFViewerProps) {
@@ -26,12 +27,20 @@ export function PDFViewer({ fileUrl, currentPage, onPageChange }: PDFViewerProps
     // Convert Cloudinary URL to proxied URL
     const proxiedUrl = `/api/proxy/pdf?url=${encodeURIComponent(fileUrl)}`;
 
+    const handleLoadError = (error: any) => {
+        console.error('Error loading PDF:', error);
+        setError('Failed to load PDF. This might be due to a browser compatibility issue. Please try downloading the file.');
+    };
+
     return (
         <div className="flex h-[80vh]">
             {/* Thumbnails */}
             <div className="w-24 bg-muted p-2 overflow-y-auto">
                 {!error && (
-                    <Document file={proxiedUrl}>
+                    <Document 
+                        file={proxiedUrl}
+                        onLoadError={handleLoadError}
+                    >
                         {Array.from(new Array(numPages), (_, index) => (
                             <div
                                 key={`thumb-${index + 1}`}
@@ -66,10 +75,7 @@ export function PDFViewer({ fileUrl, currentPage, onPageChange }: PDFViewerProps
                     <Document
                         file={proxiedUrl}
                         onLoadSuccess={({ numPages }) => setNumPages(numPages)}
-                        onLoadError={(error) => {
-                            console.error('Error loading PDF:', error);
-                            setError('Failed to load PDF. Please try downloading the file.');
-                        }}
+                        onLoadError={handleLoadError}
                         loading={
                             <div className="flex items-center justify-center h-full">
                                 <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />

@@ -4,12 +4,12 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
-import { Avatar } from '@/components/ui/avatar';
 import { NavigationSidebar } from './NavigationSidebar';
 import { UserMenu } from './UserMenu';
 import { CreateMenu } from './CreateMenu';
 import { Search } from './Search';
 import { GamificationWidget } from '@/components/gamification';
+import NotificationBell from '@/components/notifications/NotificationBell';
 
 export function Navigation() {
     const { data: session } = useSession();
@@ -49,6 +49,9 @@ export function Navigation() {
                             <div className="hidden lg:block">
                                 <GamificationWidget type="quick-stats" />
                             </div>
+
+                            {/* Notifications */}
+                            <NotificationBell />
 
                             <CreateMenu />
                             <UserMenu user={session.user} />

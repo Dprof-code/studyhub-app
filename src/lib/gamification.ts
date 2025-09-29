@@ -2,16 +2,15 @@
 import { db } from './dbconfig';
 import type {
     ActivityType,
-    AchievementCategory,
     ReputationTier,
     VoteType,
-    User,
     UserStats
 } from '@/generated/prisma';
 
 // Point values for different activities
-export const ACTIVITY_POINTS = {
+export const ACTIVITY_POINTS: Record<ActivityType, { xp: number; reputation: number }> = {
     RESOURCE_UPLOAD: { xp: 15, reputation: 5 },
+    RESOURCE_DOWNLOAD: { xp: 1, reputation: 0 },
     COURSE_CREATION: { xp: 25, reputation: 10 },
     COMMENT_HELPFUL: { xp: 8, reputation: 3 },
     DISCUSSION_PARTICIPATION: { xp: 5, reputation: 2 },
@@ -376,8 +375,9 @@ function checkMilestoneAchievement(conditions: any, stats: UserStats, activity: 
  * Get activity description for logging
  */
 function getActivityDescription(activityType: ActivityType): string {
-    const descriptions = {
+    const descriptions: Record<ActivityType, string> = {
         RESOURCE_UPLOAD: 'Uploaded a new resource',
+        RESOURCE_DOWNLOAD: 'Downloaded a resource',
         COURSE_CREATION: 'Created a new course',
         COMMENT_HELPFUL: 'Posted a helpful comment',
         DISCUSSION_PARTICIPATION: 'Participated in discussion',
@@ -444,4 +444,32 @@ export async function updateLoginStreak(userId: number): Promise<void> {
 
     // Award daily login points
     await awardActivityPoints(userId, 'DAILY_LOGIN');
+}
+
+/**
+ * Track user interactions for analytics and gamification
+ */
+export async function trackUserInteraction({
+    userId,
+    type,
+    resourceId,
+    metadata
+}: {
+    userId: number;
+    type: string;
+    resourceId?: number;
+    metadata?: Record<string, any>;
+}): Promise<void> {
+    try {
+        await db.userInteraction.create({
+            data: {
+                userId,
+                interactionType: type,
+                resourceId,
+                metadata: metadata || {}
+            }
+        });
+    } catch (error) {
+        console.error('Error tracking user interaction:', error);
+    }
 }

@@ -18,6 +18,8 @@ import {
 import { ResourceComment } from '@/components/resources/ResourceComment';
 import { ResourceViewer } from '@/components/resources/ResourceViewer';
 import { RelatedResources } from '@/components/resources/RelatedResources';
+import { AnalyzeQuestionsPanel } from '@/components/ai/AnalyzeQuestionsPanel';
+import { QuestionAnalysisDashboard } from '@/components/ai/QuestionAnalysisDashboard';
 
 type ResourceDetails = {
     id: number;
@@ -41,6 +43,8 @@ type ResourceDetails = {
     year?: number;
     tags: Array<{ id: number; name: string }>;
     createdAt: string;
+    isPastQuestion?: boolean;
+    aiProcessingStatus?: string;
     _count: {
         reactions: {
             LIKE: number;
@@ -190,8 +194,24 @@ export default function ResourcePage({ params }: { params: Promise<{ id: string 
                             <h2 className="font-semibold">Comments</h2>
                             <ResourceComment resourceId={resource.id} />
                         </div>
+
+                        {/* AI Analysis Panel */}
+                        {(resource.fileType === 'application/pdf' || resource.fileType?.startsWith('image/')) && (
+                            <AnalyzeQuestionsPanel
+                                resourceId={resource.id}
+                                resourceTitle={resource.title}
+                            />
+                        )}
                     </div>
                 </div>
+
+                {/* AI Analysis Dashboard */}
+                {resource.isPastQuestion && resource.aiProcessingStatus === 'COMPLETED' && (
+                    <div className="mt-8">
+                        <h2 className="text-xl font-semibold mb-4">AI Question Analysis</h2>
+                        <QuestionAnalysisDashboard resourceId={resource.id} />
+                    </div>
+                )}
 
                 {/* Related Resources */}
                 <div className="mt-8">

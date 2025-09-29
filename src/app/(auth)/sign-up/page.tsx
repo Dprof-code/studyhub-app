@@ -54,8 +54,6 @@ const SignUp = () => {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'student' | 'lecturer'>('student');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showRoleModal, setShowRoleModal] = useState(false);
-  // const [googleEmail, setGoogleEmail] = useState('');
 
   // Check if Google OAuth is available
   const isGoogleEnabled = process.env.NEXT_PUBLIC_GOOGLE_ENABLED === 'true';

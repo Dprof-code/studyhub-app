@@ -45,6 +45,22 @@ enum ModActionType {
   REJECT
 }
 
+// AI Processing Enums
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum QuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
+
 // ───────────── Core Identity ─────────────
 model User {
   id           Int         @id @default(autoincrement())
@@ -98,6 +114,18 @@ model User {
 
   // Course Enrollment
   enrollments Enrollment[]
+
+  // AI & Analytics Relations
+  userInteractions   UserInteraction[]
+  studyPlans         StudyPlan[]
+  studySessions      StudySession[]
+  gamificationEvents GamificationEvent[]
+  courseAnalyses     CourseAnalysis[]
+
+  // Notification Relations
+  notifications             Notification[]
+  notificationSubscriptions NotificationSubscription[]
+  notificationPreferences   NotificationPreference?
 }
 
 model Credential {
@@ -151,6 +179,10 @@ model Course {
   synopsisHistory CourseSynopsisHistory[]
   Thread          Thread[]
   enrollments     Enrollment[]
+
+  // AI & Analytics Relations
+  studySessions  StudySession[]
+  courseAnalyses CourseAnalysis[]
 }
 
 model CourseSynopsisHistory {
@@ -211,8 +243,19 @@ model Resource {
   Report      Report[]
   comments    ResourceComment[]
 
+  // AI & RAG System Fields
+  isPastQuestion     Boolean             @default(false)
+  aiProcessingStatus ProcessingStatus?
+  ragContent         String?             @db.Text // Processed content for RAG
+  extractedQuestions ExtractedQuestion[]
+  conceptMappings    ConceptResource[]
+  aiProcessingJobs   AIProcessingJob[]
+
   // Gamification Relations
   votes ContentVote[]
+
+  // AI & Analytics Relations  
+  userInteractions UserInteraction[]
 }
 
 model Tag {
@@ -442,11 +485,99 @@ model ChatAttachment {
   @@index([messageId])
 }
 
+// ───────────── AI & RAG System ─────────────
+
+model ExtractedQuestion {
+  id             Int                @id @default(autoincrement())
+  resourceId     Int
+  resource       Resource           @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  questionText   String             @db.Text
+  questionNumber String?
+  marks          Int?
+  difficulty     QuestionDifficulty @default(MEDIUM)
+  aiAnalysis     Json? // Store AI-generated metadata
+  createdAt      DateTime           @default(now())
+
+  // Relationships
+  concepts QuestionConcept[]
+
+  @@index([resourceId])
+  @@index([difficulty])
+}
+
+model Concept {
+  id              Int       @id @default(autoincrement())
+  name            String    @unique
+  description     String?
+  category        String // e.g., "Mathematics", "Physics", "Computer Science"
+  parentConceptId Int?
+  parent          Concept?  @relation("ConceptHierarchy", fields: [parentConceptId], references: [id])
+  children        Concept[] @relation("ConceptHierarchy")
+  aiSummary       String?   @db.Text // Generated explanations
+  createdAt       DateTime  @default(now())
+
+  // Relationships
+  questions QuestionConcept[]
+  resources ConceptResource[]
+
+  @@index([category])
+  @@index([parentConceptId])
+}
+
+model QuestionConcept {
+  id            Int               @id @default(autoincrement())
+  questionId    Int
+  question      ExtractedQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  conceptId     Int
+  concept       Concept           @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  confidence    Float             @default(0.0) // AI confidence score (0.0 to 1.0)
+  isMainConcept Boolean           @default(false)
+
+  @@unique([questionId, conceptId])
+  @@index([questionId])
+  @@index([conceptId])
+  @@index([confidence])
+}
+
+model ConceptResource {
+  id               Int      @id @default(autoincrement())
+  conceptId        Int
+  concept          Concept  @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  resourceId       Int
+  resource         Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  relevanceScore   Float    @default(0.0) // Relevance score (0.0 to 1.0)
+  extractedContent String?  @db.Text // Relevant sections from the resource
+  createdAt        DateTime @default(now())
+
+  @@unique([conceptId, resourceId])
+  @@index([conceptId])
+  @@index([resourceId])
+  @@index([relevanceScore])
+}
+
+model AIProcessingJob {
+  id           String           @id @default(uuid())
+  resourceId   Int
+  resource     Resource         @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  status       ProcessingStatus @default(PENDING)
+  progress     Int              @default(0) // 0-100 percentage
+  results      Json? // Processing results
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@index([resourceId])
+  @@index([status])
+  @@index([createdAt])
+}
+
 // ───────────── Gamification & Reputation System ─────────────
 
 // Points & Experience System
 enum ActivityType {
   RESOURCE_UPLOAD
+  RESOURCE_DOWNLOAD
   COURSE_CREATION
   COMMENT_HELPFUL
   DISCUSSION_PARTICIPATION
@@ -729,4 +860,240 @@ model UserBadge {
   @@unique([userId, badgeId])
   @@index([userId])
   @@index([awardedAt])
+}
+
+// ───────────── AI & Analytics Models ─────────────
+
+model UserInteraction {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  interactionType String // SEARCH, DOWNLOAD, VIEW, etc.
+  resourceId      Int?
+  metadata        Json? // Additional data about the interaction
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resource Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([interactionType])
+  @@index([createdAt])
+  @@map("user_interactions")
+}
+
+model StudyPlan {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  title          String
+  goals          String[] // Study goals
+  timeframe      String // week, month, semester
+  estimatedHours Int // Total estimated study hours
+  plan           Json // AI-generated study plan structure
+  status         String   @default("ACTIVE") // ACTIVE, COMPLETED, PAUSED
+  progress       Float    @default(0.0) // Progress percentage
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("study_plans")
+}
+
+model StudySession {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  duration    Int // Duration in minutes
+  courseId    Int?
+  resourceIds Int[] // Resources studied in this session
+  concepts    String[] // Concepts covered
+  notes       String? // Optional session notes
+  createdAt   DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([courseId])
+  @@index([createdAt])
+  @@map("study_sessions")
+}
+
+model GamificationEvent {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  eventType   String // XP_EARNED, BADGE_AWARDED, LEVEL_UP, etc.
+  xpAwarded   Int      @default(0)
+  description String? // Human-readable description
+  metadata    Json? // Additional event data
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("gamification_events")
+}
+
+// Course Analysis Model for Phase 3 AI Processing
+model CourseAnalysis {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  courseId     Int
+  analysisType String // CONTENT_STRUCTURE, DIFFICULTY_PROGRESSION, etc.
+  results      Json // Analysis results data
+  insights     Json // AI-generated insights
+  summary      Json // Analysis summary and key metrics
+  metadata     Json? // Additional metadata and configuration
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([courseId])
+  @@index([analysisType])
+  @@index([createdAt])
+  @@map("course_analyses")
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Phase 7: Notifications & PWA System
+// ─────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  SYSTEM // System announcements
+  ACHIEVEMENT // Badge/achievement unlocked
+  STUDY_REMINDER // Study session reminders
+  CHAT_MESSAGE // New chat message
+  COURSE_UPDATE // Course content updated
+  PEER_MATCH // New peer match found
+  RESOURCE_SHARED // Resource shared with user
+  QUIZ_RESULT // Quiz/assessment completed
+  COLLABORATION // Collaboration invite/update
+  AI_INSIGHT // New AI-generated insight
+  DEADLINE_REMINDER // Assignment/exam deadline
+  SOCIAL_ACTIVITY // Social interactions (likes, comments)
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Notification {
+  id       String               @id @default(cuid())
+  userId   Int
+  type     NotificationType
+  status   NotificationStatus   @default(UNREAD)
+  priority NotificationPriority @default(NORMAL)
+
+  title      String
+  message    String
+  actionUrl  String? // Optional URL for action button
+  actionText String? // Text for action button
+
+  // Rich notification data (JSON)
+  data Json? // Additional structured data
+
+  // Delivery tracking
+  delivered   Boolean   @default(false)
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  // Scheduling
+  scheduledFor DateTime? // For scheduled notifications
+  expiresAt    DateTime? // Expiration time
+
+  // Grouping and batching
+  groupKey String? // For grouping similar notifications
+  batchId  String? // For batch operations
+
+  // Push notification tracking
+  pushSent   Boolean  @default(false)
+  pushTokens String[] // FCM/VAPID tokens used
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([priority])
+  @@index([scheduledFor])
+  @@index([groupKey])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationSubscription {
+  id        String  @id @default(cuid())
+  userId    Int
+  endpoint  String
+  p256dhKey String
+  authKey   String
+  userAgent String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  lastUsed  DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@index([isActive])
+  @@map("notification_subscriptions")
+}
+
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId Int    @unique
+
+  // Channel preferences
+  emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
+  inAppEnabled Boolean @default(true)
+
+  // Type preferences (JSON object with NotificationType as keys)
+  typePreferences Json @default("{}")
+
+  // Timing preferences
+  quietHoursStart String? // HH:MM format
+  quietHoursEnd   String? // HH:MM format
+  timezone        String  @default("UTC")
+
+  // Frequency settings
+  digestEnabled   Boolean @default(false)
+  digestFrequency String  @default("daily") // daily, weekly
+  digestTime      String  @default("09:00") // HH:MM format
+
+  // Batching settings
+  batchingEnabled Boolean @default(true)
+  batchingDelay   Int     @default(300) // seconds
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }

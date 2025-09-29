@@ -5,9 +5,12 @@ import { twMerge } from "tailwind-merge"
 
 
 export function cn(...inputs: ClassValue[]) {
-
   return twMerge(clsx(inputs))
+}
 
+// Alternative name for cn function - commonly used for conditional classes
+export function classNames(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
 }
 
 

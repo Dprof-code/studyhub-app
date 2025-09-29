@@ -77,6 +77,23 @@ export function ProfileSidebar({ username }: { username: string }) {
                 </div>
             </div>
 
+            {/* AI Dashboard Quick Access */}
+            <div className="bg-card rounded-lg border border-border p-4">
+                <h2 className="font-semibold mb-4">AI Learning Assistant</h2>
+                <div className="space-y-3">
+                    <Link
+                        href="/dashboard/ai"
+                        className="flex items-center gap-3 p-3 rounded-lg bg-blue-500/5 hover:bg-blue-500/10 transition-colors border border-blue-500/20"
+                    >
+                        <span className="material-symbols-outlined text-blue-600">psychology</span>
+                        <div className="flex-1">
+                            <div className="font-medium text-sm">AI Dashboard</div>
+                            <div className="text-xs text-muted-foreground">Learning insights & analytics</div>
+                        </div>
+                    </Link>
+                </div>
+            </div>
+
             {/* Study Buddies Section */}
             <div className="bg-card rounded-lg border border-border p-4">
                 <h2 className="font-semibold mb-4">Study Buddies</h2>

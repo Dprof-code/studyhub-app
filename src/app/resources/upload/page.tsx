@@ -11,6 +11,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Brain } from 'lucide-react';
 import { toast } from 'sonner';
 import { useGamification } from '@/hooks/useGamification';
 
@@ -67,6 +68,7 @@ export default function UploadResources() {
     const [courseQuery, setCourseQuery] = useState('');
     const [courseSuggestions, setCourseSuggestions] = useState<Array<{ id: number; code: string; title: string; department: { name: string; faculty: { name: string } } }>>([]);
     const [selectedCourse, setSelectedCourse] = useState<{ id: number; code: string; title: string } | null>(null);
+    const [enableAIAnalysis, setEnableAIAnalysis] = useState(false);
     const debouncedCourseQuery = useDebounce(courseQuery, 300);
 
     const {
@@ -187,7 +189,27 @@ export default function UploadResources() {
                 tags: selectedTags
             });
 
-            toast.success('Resource uploaded successfully! +20 XP earned');
+            // Trigger AI analysis if enabled
+            if (enableAIAnalysis && (selectedTags.includes('past-question') || selectedTags.includes('tutorial') || selectedTags.includes('assignment'))) {
+                try {
+                    const aiResponse = await fetch('/api/ai/analyze-questions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ resourceId: resource.id }),
+                    });
+
+                    if (aiResponse.ok) {
+                        toast.success('Resource uploaded successfully! AI analysis started. +20 XP earned');
+                    } else {
+                        toast.success('Resource uploaded successfully! +20 XP earned (AI analysis failed to start)');
+                    }
+                } catch (aiError) {
+                    console.error('Failed to start AI analysis:', aiError);
+                    toast.success('Resource uploaded successfully! +20 XP earned (AI analysis failed to start)');
+                }
+            } else {
+                toast.success('Resource uploaded successfully! +20 XP earned');
+            }
             router.push(`/resources/${resource.id}`);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Failed to upload resource');
@@ -412,6 +434,29 @@ export default function UploadResources() {
                                 )}
                             </div>
                         )}
+
+                        {/* AI Analysis Option */}
+                        {(file?.type === 'application/pdf' || file?.type?.startsWith('image/')) &&
+                            (selectedTags.includes('past-question') || selectedTags.includes('tutorial') || selectedTags.includes('assignment')) && (
+                                <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                    <div className="flex items-center space-x-3">
+                                        <input
+                                            type="checkbox"
+                                            id="ai-analysis"
+                                            checked={enableAIAnalysis}
+                                            onChange={(e) => setEnableAIAnalysis(e.target.checked)}
+                                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <label htmlFor="ai-analysis" className="flex items-center space-x-2 text-sm font-medium text-blue-900">
+                                            <Brain className="h-4 w-4" />
+                                            <span>Enable AI Question Analysis</span>
+                                        </label>
+                                    </div>
+                                    <p className="text-sm text-blue-700">
+                                        Automatically extract questions, identify key concepts, and find related study materials using AI.
+                                    </p>
+                                </div>
+                            )}
 
                         {/* Submit Button */}
                         <Button

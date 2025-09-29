@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ContentVoting } from '@/components/gamification';
 import { TrackPageView } from '@/components/gamification/ActivityTracker';
 import { RecommendationInsights } from '@/components/recommendations/RecommendationInsights';
-import { Sparkles, TrendingUp } from 'lucide-react';
+import { Sparkles, TrendingUp, Brain, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -56,6 +56,11 @@ type Resource = {
     };
     year?: number;
     tags: Array<{ id: number; name: string }>;
+    isPastQuestion?: boolean;
+    aiProcessingStatus?: string;
+    _count?: {
+        extractedQuestions?: number;
+    };
     createdAt: string;
 };
 
@@ -188,6 +193,18 @@ export default function ResourcesPage() {
                                             {tag.name}
                                         </Badge>
                                     ))}
+                                    {resource.isPastQuestion && resource.aiProcessingStatus === 'COMPLETED' && (
+                                        <Badge className="bg-green-100 text-green-800 border-green-200">
+                                            <Brain className="h-3 w-3 mr-1" />
+                                            AI Analyzed
+                                        </Badge>
+                                    )}
+                                    {resource._count?.extractedQuestions && resource._count.extractedQuestions > 0 && (
+                                        <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                            {resource._count.extractedQuestions} Questions
+                                        </Badge>
+                                    )}
                                 </div>
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-2">
@@ -209,12 +226,25 @@ export default function ResourcesPage() {
                     {/* Voting Section - Outside the Link */}
                     <div className="px-4 pb-4 bg-card rounded-b-lg -mt-4 relative z-10">
                         <div className="border-t pt-3">
-                            <ContentVoting
-                                contentId={resource.id}
-                                contentType="resource"
-                                size="sm"
-                                showDetails={false}
-                            />
+                            <div className="flex justify-between items-center">
+                                <ContentVoting
+                                    contentId={resource.id}
+                                    contentType="resource"
+                                    size="sm"
+                                    showDetails={false}
+                                />
+                                {resource.isPastQuestion && resource.aiProcessingStatus === 'COMPLETED' && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => router.push(`/resources/${resource.id}/analysis`)}
+                                        className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                                    >
+                                        <Brain className="h-3 w-3 mr-1" />
+                                        AI Analysis
+                                    </Button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -1,16 +1,20 @@
 'use client';
 
-// ...existing imports...
+import { useState } from 'react';
+import Link from 'next/link';
+import { signOut } from 'next-auth/react';
+import { Avatar } from '@/components/ui/avatar';
+
 
 export function UserMenu({ user }: { user: any }) {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
-       
 
 
 
-<div className="relative">
+
+        <div className="relative">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="flex items-center gap-2 hover:opacity-80"

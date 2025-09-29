@@ -114,8 +114,9 @@ export function ProfileContent({
                 const error = await response.json();
                 toast.error(error.error || 'Failed to auto-enroll');
             }
-        } catch (_error) {
+        } catch (error) {
             toast.error('Error during auto-enrollment');
+            console.error('Auto-enroll error:', error);
         }
     };
 
@@ -134,8 +135,9 @@ export function ProfileContent({
                 const error = await response.json();
                 toast.error(error.error || 'Failed to drop course');
             }
-        } catch (_error) {
+        } catch (error) {
             toast.error('Error dropping course');
+            console.error('Drop course error:', error);
         }
     };
 
@@ -154,8 +156,9 @@ export function ProfileContent({
                 const error = await response.json();
                 toast.error(error.error || 'Failed to re-enroll');
             }
-        } catch (_error) {
+        } catch (error) {
             toast.error('Error re-enrolling in course');
+            console.error('Re-enroll error:', error);
         }
     };
 
@@ -177,8 +180,9 @@ export function ProfileContent({
                 const error = await response.json();
                 toast.error(error.error || 'Failed to enroll');
             }
-        } catch (_error) {
+        } catch (error) {
             toast.error('Error enrolling in course');
+            console.error('Enroll error:', error);
         }
     };
 

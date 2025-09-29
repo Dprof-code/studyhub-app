@@ -19,6 +19,7 @@ export function ProfileTabs({
     activeTab: string;
     onTabChange: (tab: string) => void;
 }) {
+    console.log(activeTab);
     return (
         <div className="border-b border-border mb-6">
             <nav className="flex space-x-8">

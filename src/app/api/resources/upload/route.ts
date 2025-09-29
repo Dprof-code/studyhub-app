@@ -39,15 +39,6 @@ export async function POST(req: Request) {
             uploadOptions.fetch_format = 'auto';
         }
 
-        // Only apply image transformations for image files
-        // if (file.type.startsWith('image/')) {
-        //     uploadOptions.transformation = [
-        //         { width: 400, height: 400, crop: "fill" },
-        //         { quality: "auto" },
-        //         { fetch_format: "auto" }
-        //     ];
-        // }
-
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataURI, uploadOptions);
 

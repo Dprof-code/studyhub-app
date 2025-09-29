@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "src/app/api/resources/upload/route.ts": {
+      "maxDuration": 60
+    }
+  },
+  "regions": ["cle1"],
+  "framework": "nextjs"
+}

@@ -113,8 +113,18 @@ export default function UploadResources() {
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
         accept: ACCEPTED_FILE_TYPES,
-        maxSize: 10485760, // 10MB
+        maxSize: 50485760, // 50MB for direct Cloudinary upload
         multiple: false,
+        onDropRejected: (fileRejections) => {
+            const error = fileRejections[0]?.errors[0];
+            if (error?.code === 'file-too-large') {
+                toast.error('File size must be less than 50MB');
+            } else if (error?.code === 'file-invalid-type') {
+                toast.error('Invalid file type. Please upload PDF, Word, PowerPoint, or image files.');
+            } else {
+                toast.error('File upload failed. Please try again.');
+            }
+        }
     });
 
     const toggleTag = (tag: string) => {
@@ -125,6 +135,32 @@ export default function UploadResources() {
             setValue('tags', newTags);
             return newTags;
         });
+    };
+
+    // Helper function for direct Cloudinary upload
+    const uploadToCloudinary = async (file: File): Promise<{ fileUrl: string; fileType: string }> => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!);
+        formData.append('folder', 'studyhub/resources');
+
+        const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/auto/upload`,
+            {
+                method: 'POST',
+                body: formData,
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error('Failed to upload to Cloudinary');
+        }
+
+        const result = await response.json();
+        return {
+            fileUrl: result.secure_url,
+            fileType: file.type,
+        };
     };
 
     // Update the onSubmit function
@@ -146,24 +182,39 @@ export default function UploadResources() {
 
         setIsUploading(true);
         try {
-            // Handle file upload
+            // Handle file upload - use direct Cloudinary upload for large files
             if (file) {
-                const formData = new FormData();
-                formData.append('file', file);
+                setUploadProgress(10);
 
-                const uploadResponse = await fetch('/api/resources/upload', {
-                    method: 'POST',
-                    body: formData,
-                });
+                // Use direct Cloudinary upload for files larger than 4MB
+                if (file.size > 4 * 1024 * 1024) {
+                    toast.info('Large file detected, uploading directly...');
+                    const { fileUrl, fileType } = await uploadToCloudinary(file);
+                    data.fileUrl = fileUrl;
+                    data.fileType = fileType;
+                    setUploadProgress(60);
+                } else {
+                    // Use server upload for smaller files
+                    const formData = new FormData();
+                    formData.append('file', file);
 
-                if (!uploadResponse.ok) {
-                    throw new Error('Failed to upload file');
+                    const uploadResponse = await fetch('/api/resources/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (!uploadResponse.ok) {
+                        throw new Error('Failed to upload file');
+                    }
+
+                    const { fileUrl, fileType } = await uploadResponse.json();
+                    data.fileUrl = fileUrl;
+                    data.fileType = fileType;
+                    setUploadProgress(60);
                 }
-
-                const { fileUrl, fileType } = await uploadResponse.json();
-                data.fileUrl = fileUrl;
-                data.fileType = fileType;
             }
+
+            setUploadProgress(80);
 
             // Create resource
             const response = await fetch('/api/resources', {
@@ -181,6 +232,7 @@ export default function UploadResources() {
             }
 
             const resource = await response.json();
+            setUploadProgress(90);
 
             // Record activity for gamification
             await recordActivity('RESOURCE_UPLOAD', {
@@ -188,6 +240,8 @@ export default function UploadResources() {
                 resourceType: resource.fileType,
                 tags: selectedTags
             });
+
+            setUploadProgress(95);
 
             // Trigger AI analysis if enabled
             if (enableAIAnalysis && (selectedTags.includes('past-question') || selectedTags.includes('tutorial') || selectedTags.includes('assignment'))) {
@@ -210,8 +264,11 @@ export default function UploadResources() {
             } else {
                 toast.success('Resource uploaded successfully! +20 XP earned');
             }
+
+            setUploadProgress(100);
             router.push(`/resources/${resource.id}`);
         } catch (error) {
+            setUploadProgress(0);
             toast.error(error instanceof Error ? error.message : 'Failed to upload resource');
         } finally {
             setIsUploading(false);

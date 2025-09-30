@@ -1,7 +1,7 @@
 import { jobQueue, JOB_TYPES } from './jobQueue';
-import { Job } from 'bull';
 import { db } from '@/lib/dbconfig';
 import * as pdfjsLib from 'pdfjs-dist';
+import * as fs from 'fs';
 
 // Configure PDF.js worker
 if (typeof window === 'undefined') {
@@ -60,17 +60,17 @@ class AIJobProcessors {
      */
     public async extractQuestionsProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType } = job.data;
-        const path = require('path');
-        const fs = require('fs');
-        let Tesseract;
+        let Tesseract: any;
         try {
-            Tesseract = require('tesseract.js');
-        } catch (e) {
-            // tesseract.js not installed
+            Tesseract = await import('tesseract.js');
+        } catch {
+            console.log('⚠️ tesseract.js not installed, image processing will fail');
         }
 
         try {
             console.log(`🔍 Starting question extraction for resource ${resourceId}`);
+            console.log(`📁 File path: ${filePath}`);
+            console.log(`📄 File type: ${fileType}`);
             job.progress = 10;
 
             // Create/update processing job record
@@ -89,47 +89,95 @@ class AIJobProcessors {
             let extractedText = '';
             let fileBuffer: Buffer;
 
-            // Handle both local files and URLs (like Cloudinary)
+            // Handle both local files and URLs (like Cloudinary) with timeout
             if (filePath.startsWith('http')) {
-                // Download file from URL
                 console.log(`📥 Downloading file from URL: ${filePath}`);
-                const response = await fetch(filePath);
+
+                const downloadPromise = fetch(filePath, {
+                    signal: AbortSignal.timeout(30000) // 30 second timeout
+                });
+
+                const response = await downloadPromise;
                 if (!response.ok) {
                     throw new Error(`Failed to download file: ${response.statusText}`);
                 }
                 fileBuffer = Buffer.from(await response.arrayBuffer());
+                console.log(`✅ Downloaded file, size: ${fileBuffer.length} bytes`);
             } else {
                 // Read local file
+                console.log(`📁 Reading local file: ${filePath}`);
+                if (!fs.existsSync(filePath)) {
+                    throw new Error(`File not found: ${filePath}`);
+                }
                 fileBuffer = fs.readFileSync(filePath);
+                console.log(`✅ Read local file, size: ${fileBuffer.length} bytes`);
             }
 
             // 1. Extract text from PDF or image
             if (fileType.toLowerCase().includes('pdf')) {
-                // PDF extraction
+                console.log(`📖 Processing PDF file...`);
                 job.progress = 20;
-                const data = new Uint8Array(fileBuffer);
-                const pdf = await pdfjsLib.getDocument({ data }).promise;
-                let text = '';
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    text += content.items.map((item: any) => item.str).join(' ') + '\n';
+
+                try {
+                    const data = new Uint8Array(fileBuffer);
+                    const loadingTask = pdfjsLib.getDocument({ data });
+
+                    // Add timeout to PDF processing
+                    const pdf = await Promise.race([
+                        loadingTask.promise,
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('PDF loading timeout')), 60000)
+                        )
+                    ]) as any; // Type assertion for PDF document
+
+                    let text = '';
+                    console.log(`📄 PDF has ${pdf.numPages} pages`);
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        console.log(`📄 Processing page ${i}/${pdf.numPages}`);
+                        const page = await pdf.getPage(i);
+                        const content = await page.getTextContent();
+                        text += content.items.map((item: any) => item.str).join(' ') + '\n';
+
+                        // Update progress for each page
+                        job.progress = 20 + (i / pdf.numPages) * 20;
+                    }
+                    extractedText = text;
+                    console.log(`✅ PDF processing complete, extracted ${text.length} characters`);
+                } catch (pdfError) {
+                    console.error(`❌ PDF processing failed:`, pdfError);
+                    throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
                 }
-                extractedText = text;
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                // Image extraction (OCR)
+                console.log(`🖼️ Processing image file with OCR...`);
                 if (!Tesseract) throw new Error('tesseract.js is not installed. Please run: npm install tesseract.js');
+
                 job.progress = 20;
-                const { data: { text } } = await Tesseract.recognize(fileBuffer, 'eng');
-                extractedText = text;
+
+                try {
+                    // Add timeout to OCR processing
+                    const ocrPromise = Tesseract.recognize(fileBuffer, 'eng');
+                    const { data: { text } } = await Promise.race([
+                        ocrPromise,
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('OCR processing timeout')), 120000)
+                        )
+                    ]);
+                    extractedText = text;
+                    console.log(`✅ OCR processing complete, extracted ${text.length} characters`);
+                } catch (ocrError) {
+                    console.error(`❌ OCR processing failed:`, ocrError);
+                    throw new Error(`OCR processing failed: ${ocrError instanceof Error ? ocrError.message : String(ocrError)}`);
+                }
             } else {
-                throw new Error('Unsupported file type for question extraction.');
+                throw new Error(`Unsupported file type for question extraction: ${fileType}`);
             }
 
-            console.log(`📄 Extracted text length: ${extractedText.length} characters`);
+            console.log(`📄 Extracted text preview: ${extractedText.substring(0, 200)}...`);
             job.progress = 40;
 
             // 2. Extract questions using regex (e.g., lines starting with number or Q)
+            console.log(`🔍 Extracting questions from text...`);
             const questionRegex = /^(?:Q\.?|Question)?\s*(\d{1,2})[\).\-:]?\s+([\s\S]+?)(?=\n(?:Q\.?|Question)?\s*\d{1,2}[\).\-:]?|$)/gim;
             const questions: any[] = [];
             let match;
@@ -143,8 +191,10 @@ class AIJobProcessors {
                 });
                 qNum++;
             }
+
             // Fallback: If no matches, split by lines and treat each as a question
             if (questions.length === 0) {
+                console.log(`⚠️ No structured questions found, using line-by-line fallback`);
                 extractedText.split('\n').forEach((line: string, idx: number) => {
                     if (line.trim().length > 20) {
                         questions.push({
@@ -157,9 +207,11 @@ class AIJobProcessors {
                 });
             }
 
+            console.log(`✅ Found ${questions.length} questions`);
             job.progress = 60;
 
             // 3. Store extracted questions in database
+            console.log(`💾 Saving questions to database...`);
             const savedQuestions = await Promise.all(
                 questions.map(async (questionData) => {
                     return await db.extractedQuestion.create({
@@ -178,6 +230,7 @@ class AIJobProcessors {
             job.progress = 80;
 
             // 4. Update resource status
+            console.log(`📊 Updating resource status...`);
             await db.resource.update({
                 where: { id: resourceId },
                 data: {
@@ -187,7 +240,7 @@ class AIJobProcessors {
             });
 
             job.progress = 100;
-            console.log(`Question extraction completed for resource ${resourceId}`);
+            console.log(`✅ Question extraction completed for resource ${resourceId}`);
 
             return {
                 questionsExtracted: savedQuestions.length,
@@ -196,14 +249,21 @@ class AIJobProcessors {
             };
 
         } catch (error) {
-            console.error(`Error in question extraction for resource ${resourceId}:`, error);
-            await db.aIProcessingJob.update({
-                where: { id: job.id },
-                data: {
-                    status: 'FAILED',
-                    errorMessage: error instanceof Error ? error.message : String(error)
-                }
-            });
+            console.error(`❌ Error in question extraction for resource ${resourceId}:`, error);
+            console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+
+            try {
+                await db.aIProcessingJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'FAILED',
+                        errorMessage: error instanceof Error ? error.message : String(error)
+                    }
+                });
+            } catch (dbError) {
+                console.error(`❌ Failed to update job status in database:`, dbError);
+            }
+
             throw error;
         }
     }
@@ -212,8 +272,6 @@ class AIJobProcessors {
      * Identify concepts from extracted questions
      */
     private async identifyConceptsProcessor(job: any): Promise<any> {
-        const { questions: _questions } = job.data;
-
         try {
             console.log(`🧠 Starting concept identification for job ${job.id}`);
             job.progress = 20;
@@ -487,6 +545,7 @@ export async function getJobStatus(jobId: string) {
 // Background processing function for serverless environment
 async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobData) {
     console.log(`🎯 Starting background processing for job: ${jobId}`);
+    console.log(`📄 Processing data:`, JSON.stringify(data, null, 2));
 
     try {
         // Update status to processing
@@ -504,6 +563,14 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
         // Create an AI processor instance to use the real extraction logic
         const processor = new AIJobProcessors();
 
+        // Update progress to show we're starting extraction
+        await db.aIProcessingJob.update({
+            where: { id: jobId },
+            data: { progress: 20 }
+        });
+
+        console.log(`🔧 Created processor instance, starting extraction...`);
+
         // Create a mock job object for the processor
         const mockJob = {
             id: jobId,
@@ -512,11 +579,29 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
                 filePath: data.filePath,
                 fileType: data.fileType
             },
-            progress: 10
+            progress: 20
         };
 
-        // Use the real extraction processor instead of mock data
-        const extractResult = await processor.extractQuestionsProcessor(mockJob);
+        console.log(`📝 Mock job data:`, JSON.stringify(mockJob, null, 2));
+
+        // Add timeout to prevent hanging
+        const extractionTimeout = 300000; // 5 minutes timeout
+        const extractionPromise = processor.extractQuestionsProcessor(mockJob);
+
+        let extractResult;
+        try {
+            console.log(`⏰ Starting extraction with ${extractionTimeout / 1000}s timeout...`);
+            extractResult = await Promise.race([
+                extractionPromise,
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Extraction timeout after 5 minutes')), extractionTimeout)
+                )
+            ]);
+            console.log(`✅ Extraction completed:`, extractResult);
+        } catch (extractError) {
+            console.error(`❌ Extraction failed:`, extractError);
+            throw new Error(`Extraction failed: ${extractError instanceof Error ? extractError.message : String(extractError)}`);
+        }
 
         await db.aIProcessingJob.update({
             where: { id: jobId },
@@ -538,11 +623,13 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
         // The resource status is already updated by the extractQuestionsProcessor
         // Complete the job
         const finalResults = {
-            questionsExtracted: extractResult.questionsExtracted,
+            questionsExtracted: extractResult.questionsExtracted || 0,
             conceptsIdentified: mockConcepts.length,
             ragIndexed: true,
             resourceMatches: 5
         };
+
+        console.log(`📊 Final results:`, finalResults);
 
         await db.aIProcessingJob.update({
             where: { id: jobId },
@@ -558,15 +645,20 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
     } catch (error) {
         console.error(`❌ Background processing failed for job: ${jobId}`, error);
+        console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
 
-        await db.aIProcessingJob.update({
-            where: { id: jobId },
-            data: {
-                status: 'FAILED',
-                errorMessage: error instanceof Error ? error.message : String(error),
-                completedAt: new Date()
-            }
-        });
+        try {
+            await db.aIProcessingJob.update({
+                where: { id: jobId },
+                data: {
+                    status: 'FAILED',
+                    errorMessage: error instanceof Error ? error.message : String(error),
+                    completedAt: new Date()
+                }
+            });
+        } catch (dbError) {
+            console.error(`❌ Failed to update job status:`, dbError);
+        }
     }
 }
 

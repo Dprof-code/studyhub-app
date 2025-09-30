@@ -58,7 +58,7 @@ class AIJobProcessors {
     /**
      * Extract questions from uploaded documents
      */
-    private async extractQuestionsProcessor(job: any): Promise<any> {
+    public async extractQuestionsProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType } = job.data;
         const path = require('path');
         const fs = require('fs');
@@ -87,11 +87,27 @@ class AIJobProcessors {
             }
 
             let extractedText = '';
+            let fileBuffer: Buffer;
+
+            // Handle both local files and URLs (like Cloudinary)
+            if (filePath.startsWith('http')) {
+                // Download file from URL
+                console.log(`📥 Downloading file from URL: ${filePath}`);
+                const response = await fetch(filePath);
+                if (!response.ok) {
+                    throw new Error(`Failed to download file: ${response.statusText}`);
+                }
+                fileBuffer = Buffer.from(await response.arrayBuffer());
+            } else {
+                // Read local file
+                fileBuffer = fs.readFileSync(filePath);
+            }
+
             // 1. Extract text from PDF or image
             if (fileType.toLowerCase().includes('pdf')) {
                 // PDF extraction
                 job.progress = 20;
-                const data = new Uint8Array(fs.readFileSync(filePath));
+                const data = new Uint8Array(fileBuffer);
                 const pdf = await pdfjsLib.getDocument({ data }).promise;
                 let text = '';
                 for (let i = 1; i <= pdf.numPages; i++) {
@@ -104,13 +120,13 @@ class AIJobProcessors {
                 // Image extraction (OCR)
                 if (!Tesseract) throw new Error('tesseract.js is not installed. Please run: npm install tesseract.js');
                 job.progress = 20;
-                const imageBuffer = fs.readFileSync(filePath);
-                const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng');
+                const { data: { text } } = await Tesseract.recognize(fileBuffer, 'eng');
                 extractedText = text;
             } else {
                 throw new Error('Unsupported file type for question extraction.');
             }
 
+            console.log(`📄 Extracted text length: ${extractedText.length} characters`);
             job.progress = 40;
 
             // 2. Extract questions using regex (e.g., lines starting with number or Q)
@@ -485,69 +501,45 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         console.log(`📝 Processing document analysis for resource ${data.resourceId}`);
 
-        // Simulate processing steps with database updates
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Create an AI processor instance to use the real extraction logic
+        const processor = new AIJobProcessors();
 
-        await db.aIProcessingJob.update({
-            where: { id: jobId },
-            data: { progress: 30 }
-        });
-
-        // Mock extracted questions
-        const mockQuestions = [
-            {
-                questionText: "Sample question extracted from the document",
-                questionNumber: "1",
-                marks: 10,
-                difficulty: 'MEDIUM'
+        // Create a mock job object for the processor
+        const mockJob = {
+            id: jobId,
+            data: {
+                resourceId: data.resourceId,
+                filePath: data.filePath,
+                fileType: data.fileType
             },
-            {
-                questionText: "Another sample question found in the document",
-                questionNumber: "2",
-                marks: 15,
-                difficulty: 'HARD'
-            }
-        ];
+            progress: 10
+        };
+
+        // Use the real extraction processor instead of mock data
+        const extractResult = await processor.extractQuestionsProcessor(mockJob);
 
         await db.aIProcessingJob.update({
             where: { id: jobId },
             data: { progress: 60 }
         });
 
-        // Store extracted questions
-        const savedQuestions = await Promise.all(
-            mockQuestions.map(async (questionData) => {
-                return await db.extractedQuestion.create({
-                    data: {
-                        resourceId: data.resourceId,
-                        questionText: questionData.questionText,
-                        questionNumber: questionData.questionNumber,
-                        marks: questionData.marks,
-                        difficulty: questionData.difficulty as any,
-                        aiAnalysis: {}
-                    }
-                });
-            })
-        );
+        // Use real concept identification (when implemented)
+        // For now, still using mock concepts but will be replaced with real AI later
+        const mockConcepts = [
+            { name: 'Linear Algebra', description: 'Mathematical concepts involving vectors and matrices', category: 'Mathematics' },
+            { name: 'Data Structures', description: 'Ways of organizing and storing data', category: 'Computer Science' }
+        ];
 
         await db.aIProcessingJob.update({
             where: { id: jobId },
             data: { progress: 80 }
         });
 
-        // Update resource status
-        await db.resource.update({
-            where: { id: data.resourceId },
-            data: {
-                aiProcessingStatus: 'COMPLETED',
-                isPastQuestion: true
-            }
-        });
-
+        // The resource status is already updated by the extractQuestionsProcessor
         // Complete the job
         const finalResults = {
-            questionsExtracted: savedQuestions.length,
-            conceptsIdentified: 2, // Mock value
+            questionsExtracted: extractResult.questionsExtracted,
+            conceptsIdentified: mockConcepts.length,
             ragIndexed: true,
             resourceMatches: 5
         };

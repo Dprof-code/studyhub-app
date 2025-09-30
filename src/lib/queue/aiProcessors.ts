@@ -424,7 +424,7 @@ export async function getJobStatus(jobId: string) {
             status: dbJob.status.toLowerCase(),
             progress: dbJob.progress,
             createdAt: dbJob.createdAt,
-            updatedAt: dbJob.updatedAt,
+            updatedAt: dbJob.completedAt || dbJob.startedAt || dbJob.createdAt, // Use completion/start time as update time
             attempts: 0,
             maxAttempts: 2,
             result: dbJob.results,

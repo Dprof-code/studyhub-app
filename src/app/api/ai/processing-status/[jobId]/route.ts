@@ -18,14 +18,9 @@ export async function GET(
         const resolvedParams = await params;
         const { jobId } = resolvedParams;
 
-        // Get job status from queue
-        const job = await getJobStatus(jobId);
+        console.log(`🔍 Fetching processing status for job: ${jobId}`);
 
-        if (!job) {
-            return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-        }
-
-        // Also get database job record for additional info
+        // Get job status from database first (for serverless compatibility)
         const dbJob = await db.aIProcessingJob.findUnique({
             where: { id: jobId },
             include: {
@@ -40,34 +35,60 @@ export async function GET(
             }
         });
 
-        // Combine queue job info with database info
+        if (!dbJob) {
+            console.error(`❌ Job not found in database: ${jobId}`);
+
+            // Fallback: try to get from in-memory queue
+            const job = await getJobStatus(jobId);
+
+            if (!job) {
+                return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+            }
+
+            // Return queue job info
+            return NextResponse.json({
+                id: job.id,
+                type: job.type,
+                status: job.status,
+                progress: job.progress,
+                createdAt: job.createdAt,
+                updatedAt: job.updatedAt,
+                attempts: job.attempts,
+                maxAttempts: job.maxAttempts,
+                resource: null,
+                databaseStatus: null
+            });
+        }
+
+        console.log(`✅ Found job in database: ${jobId}, Status: ${dbJob.status}, Progress: ${dbJob.progress}`);
+
+        // Return database job info (primary source for serverless)
         const response = {
-            id: job.id,
-            type: job.type,
-            status: dbJob?.status || job.status,
-            progress: dbJob?.progress || job.progress,
-            createdAt: job.createdAt,
-            updatedAt: job.updatedAt,
-            attempts: job.attempts,
-            maxAttempts: job.maxAttempts,
-            result: job.result,
-            error: job.error,
-            results: dbJob?.results || job.result,
-            // Additional database info if available
-            resource: dbJob ? {
+            id: dbJob.id,
+            type: 'analyze-document',
+            status: dbJob.status,
+            progress: dbJob.progress,
+            createdAt: dbJob.createdAt,
+            updatedAt: dbJob.createdAt, // Use createdAt as fallback since updatedAt might not exist
+            attempts: 0,
+            maxAttempts: 2,
+            result: dbJob.results,
+            error: dbJob.errorMessage,
+            results: dbJob.results,
+            resource: {
                 id: dbJob.resource.id,
                 title: dbJob.resource.title,
                 courseTitle: dbJob.resource.course?.title,
                 uploader: dbJob.resource.uploader.username
-            } : null,
-            databaseStatus: dbJob ? {
+            },
+            databaseStatus: {
                 status: dbJob.status,
                 progress: dbJob.progress,
                 errorMessage: dbJob.errorMessage,
                 results: dbJob.results,
                 startedAt: dbJob.startedAt,
                 completedAt: dbJob.completedAt
-            } : null
+            }
         };
 
         return NextResponse.json(response);

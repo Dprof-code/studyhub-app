@@ -78,7 +78,7 @@ export function AnalyzeQuestionsPanel({
                 } else if (statusData.status === 'FAILED') {
                     clearInterval(pollInterval);
                     setIsAnalyzing(false);
-                    setError(statusData.errorMessage || 'Analysis failed');
+                    setError(statusData.errorMessage || statusData.error || 'Analysis failed');
                 }
             } catch (error) {
                 console.error('Error polling status:', error);
@@ -90,7 +90,8 @@ export function AnalyzeQuestionsPanel({
     };
 
     const getStatusMessage = (status: string, progress: number) => {
-        switch (status) {
+        const normalizedStatus = status.toUpperCase();
+        switch (normalizedStatus) {
             case 'PENDING':
                 return 'Queued for processing...';
             case 'PROCESSING':

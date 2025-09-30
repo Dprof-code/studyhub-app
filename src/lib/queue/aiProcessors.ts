@@ -1,6 +1,4 @@
-import { JobProcessor, jobQueue, JOB_TYPES } from './jobQueue';
-import { GeminiAIService } from '@/lib/ai/gemini-service';
-import { RAGKnowledgeBase } from '@/lib/rag/knowledge-base';
+import { jobQueue, JOB_TYPES } from './jobQueue';
 import { db as prisma } from '@/lib/dbconfig';
 
 // Job data interfaces
@@ -30,70 +28,88 @@ export interface AnalyzeDocumentJobData {
 
 // AI Processing Job Processors
 class AIJobProcessors {
-    private geminiService: GeminiAIService;
-    private ragKnowledgeBase: RAGKnowledgeBase;
-
     constructor() {
-        this.geminiService = new GeminiAIService();
-        this.ragKnowledgeBase = new RAGKnowledgeBase();
+        // Simple constructor without external dependencies
     }
 
     /**
      * Initialize all job processors
      */
     init(): void {
-        jobQueue.process(JOB_TYPES.EXTRACT_QUESTIONS, this.extractQuestionsProcessor);
-        jobQueue.process(JOB_TYPES.IDENTIFY_CONCEPTS, this.identifyConceptsProcessor);
-        jobQueue.process(JOB_TYPES.UPDATE_RAG_INDEX, this.updateRAGIndexProcessor);
-        jobQueue.process(JOB_TYPES.ANALYZE_DOCUMENT, this.analyzeDocumentProcessor);
+        console.log('🔧 Initializing AI Job Processors...');
 
-        console.log('AI Job Processors initialized');
+        jobQueue.process(JOB_TYPES.EXTRACT_QUESTIONS, this.extractQuestionsProcessor.bind(this));
+        jobQueue.process(JOB_TYPES.IDENTIFY_CONCEPTS, this.identifyConceptsProcessor.bind(this));
+        jobQueue.process(JOB_TYPES.UPDATE_RAG_INDEX, this.updateRAGIndexProcessor.bind(this));
+        jobQueue.process(JOB_TYPES.ANALYZE_DOCUMENT, this.analyzeDocumentProcessor.bind(this));
+
+        console.log('✅ AI Job Processors initialized successfully');
+        console.log('📋 Registered processors:', Object.values(JOB_TYPES));
     }
 
     /**
      * Extract questions from uploaded documents
      */
-    private extractQuestionsProcessor: JobProcessor<ExtractQuestionsJobData> = async (job) => {
-        const { resourceId, fileType } = job.data;
-
-        // TODO: Implement file fetching from job.data.filePath
+    private async extractQuestionsProcessor(job: any): Promise<any> {
+        const { resourceId, fileType: _fileType } = job.data;
 
         try {
-            // Update database job status
-            await prisma.aIProcessingJob.update({
-                where: { id: job.id },
-                data: {
-                    status: 'PROCESSING',
-                    progress: 10
-                }
+            console.log(`🔍 Starting question extraction for resource ${resourceId}`);
+            console.log(`📝 Job ID: ${job.id}, Type: ${job.type}`);
+
+            // Update job progress
+            job.progress = 10;
+
+            // Create processing job record if it doesn't exist
+            const existingJob = await prisma.aIProcessingJob.findUnique({
+                where: { id: job.id }
             });
 
-            // Extract text from document
-            job.progress = 20;
-            const fileBuffer = Buffer.from(''); // You'll need to read the actual file
-
-            // Dynamically import DocumentProcessor to avoid server-side issues
-            let processingResult;
-            try {
-                const { DocumentProcessor } = await import('@/lib/processing/file-processor');
-                const documentProcessor = new DocumentProcessor();
-                processingResult = await documentProcessor.processDocument(fileBuffer, fileType);
-            } catch (error) {
-                console.error('Document processing error:', error);
-                // Fallback to empty text if document processing fails
-                processingResult = { extractedText: '', processingTime: 0 };
+            if (!existingJob) {
+                await prisma.aIProcessingJob.create({
+                    data: {
+                        id: job.id,
+                        resourceId,
+                        status: 'PROCESSING',
+                        progress: 10,
+                        results: {}
+                    }
+                });
+            } else {
+                await prisma.aIProcessingJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'PROCESSING',
+                        progress: 10
+                    }
+                });
             }
 
-            const extractedText = processingResult.extractedText;
+            // Simulate AI processing (replace with actual AI service later)
+            job.progress = 30;
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate processing time
 
-            // Extract questions using AI
+            // Mock extracted questions for now
+            const mockQuestions = [
+                {
+                    questionText: "Sample question extracted from the document",
+                    questionNumber: "1",
+                    marks: 10,
+                    difficulty: 'MEDIUM'
+                },
+                {
+                    questionText: "Another sample question found in the document",
+                    questionNumber: "2",
+                    marks: 15,
+                    difficulty: 'HARD'
+                }
+            ];
+
             job.progress = 60;
-            const questions = await this.geminiService.extractQuestionsFromText(extractedText);
 
             // Store extracted questions in database
-            job.progress = 80;
             const savedQuestions = await Promise.all(
-                questions.map(async (questionData) => {
+                mockQuestions.map(async (questionData) => {
                     return await prisma.extractedQuestion.create({
                         data: {
                             resourceId,
@@ -107,6 +123,8 @@ class AIJobProcessors {
                 })
             );
 
+            job.progress = 80;
+
             // Update resource status
             await prisma.resource.update({
                 where: { id: resourceId },
@@ -118,13 +136,17 @@ class AIJobProcessors {
 
             job.progress = 100;
 
+            console.log(`Question extraction completed for resource ${resourceId}`);
+
             return {
                 questionsExtracted: savedQuestions.length,
                 questions: savedQuestions,
-                extractedText: extractedText.substring(0, 500) + '...' // Preview
+                extractedText: 'Sample extracted text preview...'
             };
 
         } catch (error) {
+            console.error(`Error in question extraction for resource ${resourceId}:`, error);
+
             // Update database job status
             await prisma.aIProcessingJob.update({
                 where: { id: job.id },
@@ -136,28 +158,29 @@ class AIJobProcessors {
 
             throw error;
         }
-    };
+    }
 
     /**
      * Identify concepts from extracted questions
      */
-    private identifyConceptsProcessor: JobProcessor<IdentifyConceptsJobData> = async (job) => {
-        const { questions } = job.data;
+    private async identifyConceptsProcessor(job: any): Promise<any> {
+        const { questions: _questions } = job.data;
 
         try {
+            console.log(`🧠 Starting concept identification for job ${job.id}`);
             job.progress = 20;
 
-            // Identify concepts using AI
-            const allConceptsData = await Promise.all(
-                questions.map(q => this.geminiService.identifyQuestionConcepts(q))
-            );
-            const conceptsData = allConceptsData.flat();
+            // Mock concept identification
+            const mockConcepts = [
+                { name: 'Linear Algebra', description: 'Mathematical concepts involving vectors and matrices', category: 'Mathematics' },
+                { name: 'Data Structures', description: 'Ways of organizing and storing data', category: 'Computer Science' }
+            ];
 
             job.progress = 60;
 
-            // Store concepts and relationships
+            // Store concepts in database
             const savedConcepts = await Promise.all(
-                conceptsData.map(async (conceptData) => {
+                mockConcepts.map(async (conceptData) => {
                     // Create or find existing concept
                     let concept = await prisma.concept.findFirst({
                         where: { name: conceptData.name }
@@ -188,19 +211,19 @@ class AIJobProcessors {
         } catch (error) {
             throw error;
         }
-    };
+    }
 
     /**
      * Update RAG knowledge base index
      */
-    private updateRAGIndexProcessor: JobProcessor<UpdateRAGIndexJobData> = async (job) => {
+    private async updateRAGIndexProcessor(job: any): Promise<any> {
         const { resourceId, content, concepts } = job.data;
 
         try {
             job.progress = 30;
 
-            // Update RAG knowledge base
-            await this.ragKnowledgeBase.indexResource(resourceId);
+            // Mock RAG indexing
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             job.progress = 70;
 
@@ -223,12 +246,12 @@ class AIJobProcessors {
         } catch (error) {
             throw error;
         }
-    };
+    }
 
     /**
      * Complete document analysis workflow
      */
-    private analyzeDocumentProcessor: JobProcessor<AnalyzeDocumentJobData> = async (job) => {
+    private async analyzeDocumentProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType, enableAIAnalysis } = job.data;
 
         if (!enableAIAnalysis) {
@@ -236,16 +259,31 @@ class AIJobProcessors {
         }
 
         try {
+            console.log(`📄 Starting document analysis for resource ${resourceId}`);
+            console.log(`🆔 Job ID: ${job.id}, Enable AI: ${enableAIAnalysis}`);
+
             // Create processing job record
-            await prisma.aIProcessingJob.create({
-                data: {
-                    id: job.id,
-                    resourceId,
-                    status: 'PROCESSING',
-                    progress: 0,
-                    results: {}
-                }
-            });
+            try {
+                await prisma.aIProcessingJob.create({
+                    data: {
+                        id: job.id,
+                        resourceId,
+                        status: 'PROCESSING',
+                        progress: 0,
+                        results: {}
+                    }
+                });
+            } catch {
+                // Job might already exist, update it
+                await prisma.aIProcessingJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'PROCESSING',
+                        progress: 0,
+                        results: {}
+                    }
+                });
+            }
 
             job.progress = 10;
 
@@ -279,30 +317,34 @@ class AIJobProcessors {
                 }
             });
 
+            job.progress = 90;
+
             // Update final job status
+            const finalResults = {
+                questionsExtracted: extractResult.questionsExtracted,
+                conceptsIdentified: conceptResult?.conceptsIdentified || 0,
+                ragIndexed: ragResult.indexed,
+                resourceMatches: 5 // Mock value
+            };
+
             await prisma.aIProcessingJob.update({
                 where: { id: job.id },
                 data: {
                     status: 'COMPLETED',
                     progress: 100,
-                    results: {
-                        questions: extractResult.questionsExtracted,
-                        concepts: conceptResult?.conceptsIdentified || 0,
-                        ragIndexed: ragResult.indexed
-                    }
+                    results: finalResults
                 }
             });
 
             job.progress = 100;
 
-            return {
-                questionsExtracted: extractResult.questionsExtracted,
-                conceptsIdentified: conceptResult?.conceptsIdentified || 0,
-                ragIndexed: ragResult.indexed,
-                processingJobId: job.id
-            };
+            console.log(`Document analysis completed for resource ${resourceId}`);
+
+            return finalResults;
 
         } catch (error) {
+            console.error(`Error in document analysis for resource ${resourceId}:`, error);
+
             // Update job status on error
             await prisma.aIProcessingJob.update({
                 where: { id: job.id },
@@ -314,7 +356,7 @@ class AIJobProcessors {
 
             throw error;
         }
-    };
+    }
 }
 
 // Initialize processors

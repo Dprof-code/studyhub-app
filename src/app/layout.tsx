@@ -7,6 +7,7 @@ import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
 import ClarityInit from "@/components/clarity-init";
 import PWAInstaller from "@/components/notifications/PWAInstaller";
+import JobSystemInit from "@/components/JobSystemInit";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -134,6 +135,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         <ClarityInit />
+        <JobSystemInit />
         <Provider>
           {children}
           <PWAInstaller />

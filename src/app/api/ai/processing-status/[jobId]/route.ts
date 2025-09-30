@@ -44,19 +44,20 @@ export async function GET(
         const response = {
             id: job.id,
             type: job.type,
-            status: job.status,
-            progress: job.progress,
+            status: dbJob?.status || job.status,
+            progress: dbJob?.progress || job.progress,
             createdAt: job.createdAt,
             updatedAt: job.updatedAt,
             attempts: job.attempts,
             maxAttempts: job.maxAttempts,
             result: job.result,
             error: job.error,
+            results: dbJob?.results || job.result,
             // Additional database info if available
             resource: dbJob ? {
                 id: dbJob.resource.id,
                 title: dbJob.resource.title,
-                courseTitle: dbJob.resource.course.title,
+                courseTitle: dbJob.resource.course?.title,
                 uploader: dbJob.resource.uploader.username
             } : null,
             databaseStatus: dbJob ? {

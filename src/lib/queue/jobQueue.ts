@@ -64,7 +64,9 @@ class JobQueue {
      * Register a processor for a job type
      */
     process<T>(type: string, processor: JobProcessor<T>): void {
+        console.log(`📝 Registering processor for job type: ${type}`);
         this.processors.set(type, processor);
+        console.log(`✅ Processor registered. Total processors: ${this.processors.size}`);
     }
 
     /**
@@ -86,16 +88,30 @@ class JobQueue {
      * Process a specific job
      */
     private async processJob(jobId: string): Promise<void> {
+        console.log(`🚀 Attempting to process job: ${jobId}`);
+
         const job = this.jobs.get(jobId);
-        if (!job || this.processing.has(jobId)) {
+        if (!job) {
+            console.error(`❌ Job not found: ${jobId}`);
             return;
         }
 
-        const processor = this.processors.get(job.type);
-        if (!processor) {
-            console.error(`No processor found for job type: ${job.type}`);
+        if (this.processing.has(jobId)) {
+            console.log(`⏳ Job already processing: ${jobId}`);
             return;
         }
+
+        console.log(`🔍 Looking for processor for job type: ${job.type}`);
+        console.log(`📋 Available processors: ${Array.from(this.processors.keys()).join(', ')}`);
+
+        const processor = this.processors.get(job.type);
+        if (!processor) {
+            console.error(`❌ No processor found for job type: ${job.type}`);
+            console.error(`Available processors: ${Array.from(this.processors.keys())}`);
+            return;
+        }
+
+        console.log(`✅ Found processor for ${job.type}, starting processing...`);
 
         this.processing.add(jobId);
         job.status = 'processing';

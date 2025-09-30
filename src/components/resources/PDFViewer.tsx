@@ -12,7 +12,7 @@ if (typeof window !== 'undefined') {
     // Primary: Use CDN with correct version
     // Fallback: Use local copy if CDN fails
     const workerUrl = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
-    
+
     try {
         pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
     } catch {
@@ -45,7 +45,7 @@ export function PDFViewer({ fileUrl, currentPage, onPageChange }: PDFViewerProps
             {/* Thumbnails */}
             <div className="w-24 bg-muted p-2 overflow-y-auto">
                 {!error && (
-                    <Document 
+                    <Document
                         file={proxiedUrl}
                         onLoadError={handleLoadError}
                     >

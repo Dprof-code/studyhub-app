@@ -5,7 +5,7 @@
 'use client';
 
 import AIDashboardLayout from '@/components/layout/AIDashboardLayout';
-import QuestionIntelligenceHub from '@/components/ai/questions/QuestionIntelligenceHub';
+import QuestionIntelligenceHub from '@/components/layout/questions/QuestionIntelligenceHub';
 
 export default function QuestionsPage() {
     return (

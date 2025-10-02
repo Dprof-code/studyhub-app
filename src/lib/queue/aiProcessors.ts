@@ -2,6 +2,7 @@ import { jobQueue, JOB_TYPES } from './jobQueue';
 import { db } from '../dbconfig';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as fs from 'fs';
+import tesseract from 'node-tesseract-ocr';
 
 // Configure PDF.js worker
 if (typeof window === 'undefined') {
@@ -60,12 +61,6 @@ class AIJobProcessors {
      */
     public async extractQuestionsProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType } = job.data;
-        let Tesseract: any;
-        try {
-            Tesseract = await import('tesseract.js');
-        } catch {
-            console.log('⚠️ tesseract.js not installed, image processing will fail');
-        }
 
         try {
             console.log(`🔍 Starting question extraction for resource ${resourceId}`);
@@ -128,7 +123,7 @@ class AIJobProcessors {
                         new Promise((_, reject) =>
                             setTimeout(() => reject(new Error('PDF loading timeout')), 60000)
                         )
-                    ]) as any; // Type assertion for PDF document
+                    ]) as any;
 
                     let text = '';
                     console.log(`📄 PDF has ${pdf.numPages} pages`);
@@ -150,25 +145,36 @@ class AIJobProcessors {
                 }
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
                 console.log(`🖼️ Processing image file with OCR...`);
-                if (!Tesseract) throw new Error('tesseract.js is not installed. Please run: npm install tesseract.js');
-
                 job.progress = 20;
 
                 try {
-                    // Add timeout to OCR processing - increased to 5 minutes for better reliability
-                    const ocrPromise = Tesseract.recognize(fileBuffer, 'eng');
-                    const { data: { text } } = await Promise.race([
-                        ocrPromise,
+                    // Save the file buffer to a temporary file (node-tesseract-ocr requires a file path)
+                    const tempFilePath = `./temp_image_${job.id}.png`;
+                    fs.writeFileSync(tempFilePath, fileBuffer);
+
+                    // Configure node-tesseract-ocr
+                    const config = {
+                        lang: 'eng',
+                        oem: 1, // Use LSTM-based OCR engine
+                        psm: 3, // Automatic page segmentation with OSD
+                    };
+
+                    console.log(`🔧 Starting OCR with node-tesseract-ocr...`);
+                    const ocrResult = await Promise.race([
+                        tesseract.recognize(tempFilePath, config),
                         new Promise((_, reject) =>
                             setTimeout(() => reject(new Error('OCR processing timeout after 5 minutes')), 300000)
                         )
-                    ]);
-                    extractedText = text;
-                    console.log(`✅ OCR processing complete, extracted ${text.length} characters`);
+                    ]) as string;
+
+                    extractedText = ocrResult;
+                    console.log(`✅ OCR processing complete, extracted ${extractedText.length} characters`);
+
+                    // Clean up temporary file
+                    fs.unlinkSync(tempFilePath);
                 } catch (ocrError) {
                     console.error(`❌ OCR processing failed:`, ocrError);
                     console.log(`🔄 Using fallback text for OCR failure`);
-                    // Don't throw error, use fallback text instead to allow processing to continue
                     extractedText = "Image file processed. OCR extraction failed due to timeout or technical issues. This may be due to poor image quality, large file size, or server limitations. Please try with a smaller, clearer image.";
                 }
             } else {

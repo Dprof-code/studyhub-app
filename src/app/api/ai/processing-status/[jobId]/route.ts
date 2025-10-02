@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { getJobStatus } from '@/lib/queue/aiProcessors';
-import { db } from '@/lib/dbconfig';
+import { authOptions } from '../../../../../lib/auth';
+import { getJobStatus } from '../../../../../lib/queue/aiProcessors';
+import { db } from '../../../../../lib/dbconfig';
 
 export async function GET(
     req: NextRequest,

@@ -451,7 +451,13 @@ export default function ResourcesPage() {
                                         ))}
                                     </div>
                                 ) : (
-                                    data?.pages.map((page) => renderResourceGrid(page.resources))
+                                    <div className="space-y-6">
+                                        {data?.pages.map((page, pageIndex) => (
+                                            <div key={pageIndex}>
+                                                {renderResourceGrid(page.resources)}
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
 
                                 {isFetchingNextPage && (

@@ -1,8 +1,8 @@
 // Job Queue Initialization
 // This file initializes the AI job processing system
 
-import { aiJobProcessors } from '@/lib/queue/aiProcessors';
-import { jobQueue } from '@/lib/queue/jobQueue';
+import { aiJobProcessors } from './aiProcessors';
+import { jobQueue } from './jobQueue';
 
 let initialized = false;
 

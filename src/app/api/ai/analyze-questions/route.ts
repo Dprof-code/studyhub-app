@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { db } from '@/lib/dbconfig';
-import { queueAIAnalysis, AnalyzeDocumentJobData } from '@/lib/queue/aiProcessors';
+import { authOptions } from '../../../../lib/auth';
+import { db } from '../../../../lib/dbconfig';
+import { queueAIAnalysis, AnalyzeDocumentJobData } from '../../../../lib/queue/aiProcessors';
 
 export async function POST(req: NextRequest) {
     try {

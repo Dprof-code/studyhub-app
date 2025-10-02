@@ -63,6 +63,13 @@ class AIJobProcessors {
         let Tesseract: any;
         try {
             Tesseract = await import('tesseract.js');
+            // Configure Tesseract worker for Next.js environment
+            if (typeof window === 'undefined') {
+                // Server-side configuration - disable verbose logging
+                if (Tesseract.setLogging) {
+                    Tesseract.setLogging(false);
+                }
+            }
         } catch {
             console.log('⚠️ tesseract.js not installed, image processing will fail');
         }
@@ -150,26 +157,40 @@ class AIJobProcessors {
                 }
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
                 console.log(`🖼️ Processing image file with OCR...`);
-                if (!Tesseract) throw new Error('tesseract.js is not installed. Please run: npm install tesseract.js');
+                if (!Tesseract) {
+                    console.log(`⚠️ Tesseract.js not available, using fallback text extraction`);
+                    // Fallback: Create some placeholder content for analysis
+                    extractedText = "Image file detected. OCR processing unavailable. Please ensure tesseract.js is properly installed and configured.";
+                } else {
+                    job.progress = 20;
 
-                job.progress = 20;
+                    try {
+                        console.log(`🔧 Starting OCR recognition...`);
 
-                try {
-                    // Add timeout to OCR processing - increased to 5 minutes for better reliability
-                    const ocrPromise = Tesseract.recognize(fileBuffer, 'eng');
-                    const { data: { text } } = await Promise.race([
-                        ocrPromise,
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('OCR processing timeout after 5 minutes')), 300000)
-                        )
-                    ]);
-                    extractedText = text;
-                    console.log(`✅ OCR processing complete, extracted ${text.length} characters`);
-                } catch (ocrError) {
-                    console.error(`❌ OCR processing failed:`, ocrError);
-                    console.log(`🔄 Using fallback text for OCR failure`);
-                    // Don't throw error, use fallback text instead to allow processing to continue
-                    extractedText = "Image file processed. OCR extraction failed due to timeout or technical issues. This may be due to poor image quality, large file size, or server limitations. Please try with a smaller, clearer image.";
+                        // Use simpler OCR approach to avoid worker issues
+                        const ocrPromise = Tesseract.recognize(fileBuffer, 'eng', {
+                            logger: (m: any) => {
+                                if (m.status === 'recognizing text') {
+                                    console.log(`📖 OCR Progress: ${Math.round(m.progress * 100)}%`);
+                                }
+                            }
+                        });
+
+                        const result = await Promise.race([
+                            ocrPromise,
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('OCR processing timeout after 5 minutes')), 300000)
+                            )
+                        ]) as any;
+
+                        extractedText = result.data.text;
+                        console.log(`✅ OCR processing complete, extracted ${extractedText.length} characters`);
+                    } catch (ocrError) {
+                        console.error(`❌ OCR processing failed:`, ocrError);
+                        console.log(`🔄 Using fallback text extraction for image`);
+                        // Fallback: Don't throw error, use placeholder text
+                        extractedText = "Image file processed. OCR extraction failed. This may be due to poor image quality, unsupported format, or technical issues. Please try with a clearer image or different format.";
+                    }
                 }
             } else {
                 throw new Error(`Unsupported file type for question extraction: ${fileType}`);
@@ -406,10 +427,9 @@ class AIJobProcessors {
             // Step 2: Identify concepts (if questions were found)
             let conceptResult = null;
             if (extractResult.questions && extractResult.questions.length > 0) {
-                const questions = extractResult.questions.map((q: any) => q.questionText);
                 conceptResult = await this.identifyConceptsProcessor({
                     ...job,
-                    data: { resourceId, questions }
+                    data: { questions: extractResult.questions.map((q: any) => q.questionText) }
                 });
             }
 

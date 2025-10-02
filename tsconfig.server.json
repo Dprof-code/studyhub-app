@@ -4,7 +4,11 @@
     "module": "commonjs",
     "outDir": "dist",
     "noEmit": false,
-    "jsx": "react"
+    "jsx": "react",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["server.ts"]
+  "include": ["server.ts", "src/**/*"],
+  "exclude": ["node_modules", ".next", "dist"]
 }

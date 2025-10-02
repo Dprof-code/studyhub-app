@@ -139,78 +139,104 @@ class AIJobProcessors {
                     throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
                 }
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                console.log(`🖼️ Processing image file with Gemini Vision AI...`);
+                console.log(`🖼️ Processing image file with Document AI OCR...`);
                 job.progress = 20;
 
                 try {
-                    // Import Gemini service early for vision processing
-                    const { geminiAI } = await import('../ai/gemini-service');
+                    // Import Document AI service for OCR processing
+                    const { documentAI } = await import('../ai/documentai-service');
 
-                    console.log(`🧠 Using Gemini Vision AI for direct text extraction from image...`);
+                    console.log(`� Using Google Cloud Document AI for text extraction...`);
+                    console.log(`📊 Image details: ${this.getMimeTypeFromFileType(fileType)}, size: ${fileBuffer.length} bytes`);
 
-                    // Convert buffer to base64 for Gemini
-                    const base64Image = fileBuffer.toString('base64');
-                    const mimeType = this.getMimeTypeFromFileType(fileType);
+                    // Check if Document AI is configured
+                    const configStatus = documentAI.getConfigurationStatus();
+                    console.log(`⚙️ Document AI configuration:`, configStatus);
 
-                    console.log(`📊 Image details: ${mimeType}, size: ${fileBuffer.length} bytes`);
+                    if (documentAI.isConfigured()) {
+                        // Use Document AI for OCR
+                        const mimeType = this.getMimeTypeFromFileType(fileType);
 
-                    // Use Gemini Vision to extract text directly from image
-                    const visionResult = await Promise.race([
-                        geminiAI.extractTextFromImage(base64Image, mimeType),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Gemini Vision processing timeout after 3 minutes')), 180000)
-                        )
-                    ]) as string;
-
-                    extractedText = visionResult;
-                    console.log(`✅ Gemini Vision processing complete, extracted ${extractedText.length} characters`);
-                    console.log(`📄 Raw Vision output preview:`, extractedText.substring(0, 500));
-
-                } catch (visionError) {
-                    console.error(`❌ Gemini Vision processing failed:`, visionError);
-                    console.log(`🔄 Falling back to traditional OCR...`);
-
-                    try {
-                        // Fallback to traditional OCR if Gemini Vision fails
-                        const tempDir = os.tmpdir();
-                        const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                        console.log(`📁 Using temporary file path for OCR fallback: ${tempFilePath}`);
-                        fs.writeFileSync(tempFilePath, fileBuffer);
-
-                        // Enhanced OCR configuration for better text extraction
-                        const config = {
-                            lang: 'eng',
-                            oem: 1, // LSTM-based OCR engine
-                            psm: 6, // Uniform block of text (better for exam papers)
-                        };
-
-                        console.log(`🔧 Starting fallback OCR with node-tesseract-ocr...`);
-
-                        const ocrResult = await Promise.race([
-                            tesseract.recognize(tempFilePath, config),
+                        const documentAIResult = await Promise.race([
+                            documentAI.extractTextFromImage(fileBuffer, mimeType),
                             new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('OCR processing timeout after 2 minutes')), 120000)
+                                setTimeout(() => reject(new Error('Document AI processing timeout after 2 minutes')), 120000)
                             )
                         ]) as string;
 
-                        extractedText = ocrResult;
-                        console.log(`✅ Fallback OCR processing complete, extracted ${extractedText.length} characters`);
+                        extractedText = documentAIResult;
+                        console.log(`✅ Document AI processing complete, extracted ${extractedText.length} characters`);
+                        console.log(`📄 Document AI output preview:`, extractedText.substring(0, 500));
+                    } else {
+                        throw new Error('Document AI not configured, falling back to alternative OCR');
+                    }
 
-                        // Clean up temporary file
-                        fs.unlinkSync(tempFilePath);
-                    } catch (ocrError) {
-                        console.error(`❌ Both Gemini Vision and OCR failed:`, ocrError);
-                        extractedText = "Image processing failed. Both AI vision and OCR extraction encountered errors. This may be due to poor image quality, unsupported format, or server limitations. Please try with a clearer, higher-resolution image in a standard format (PNG, JPG).";
+                } catch (documentAIError) {
+                    console.error(`❌ Document AI processing failed:`, documentAIError);
+                    console.log(`🔄 Falling back to Gemini Vision OCR...`);
 
-                        // Attempt to clean up if file exists
+                    try {
+                        // Fallback to Gemini Vision OCR
+                        const { geminiAI } = await import('../ai/gemini-service');
+
+                        const base64Image = fileBuffer.toString('base64');
+                        const mimeType = this.getMimeTypeFromFileType(fileType);
+
+                        const geminiResult = await Promise.race([
+                            geminiAI.extractTextFromImage(base64Image, mimeType),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Gemini Vision timeout after 90 seconds')), 90000)
+                            )
+                        ]) as string;
+
+                        extractedText = geminiResult;
+                        console.log(`✅ Gemini Vision fallback complete, extracted ${extractedText.length} characters`);
+                    } catch (geminiError) {
+                        console.error(`❌ Gemini Vision fallback failed:`, geminiError);
+                        console.log(`🔄 Falling back to traditional OCR...`);
+
                         try {
+                            // Final fallback to traditional OCR
                             const tempDir = os.tmpdir();
                             const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                            if (fs.existsSync(tempFilePath)) {
-                                fs.unlinkSync(tempFilePath);
+                            console.log(`📁 Using temporary file path for OCR fallback: ${tempFilePath}`);
+                            fs.writeFileSync(tempFilePath, fileBuffer);
+
+                            // Enhanced OCR configuration for better text extraction
+                            const config = {
+                                lang: 'eng',
+                                oem: 1, // LSTM-based OCR engine
+                                psm: 6, // Uniform block of text (better for exam papers)
+                            };
+
+                            console.log(`🔧 Starting traditional OCR with node-tesseract-ocr...`);
+
+                            const ocrResult = await Promise.race([
+                                tesseract.recognize(tempFilePath, config),
+                                new Promise((_, reject) =>
+                                    setTimeout(() => reject(new Error('OCR processing timeout after 90 seconds')), 90000)
+                                )
+                            ]) as string;
+
+                            extractedText = ocrResult;
+                            console.log(`✅ Traditional OCR processing complete, extracted ${extractedText.length} characters`);
+
+                            // Clean up temporary file
+                            fs.unlinkSync(tempFilePath);
+                        } catch (ocrError) {
+                            console.error(`❌ All OCR methods failed:`, ocrError);
+                            extractedText = "All OCR processing methods failed. This may be due to poor image quality, unsupported format, network issues, or configuration problems. Please try with a clearer, higher-resolution image in a standard format (PNG, JPG), or check your API configurations.";
+
+                            // Attempt to clean up if file exists
+                            try {
+                                const tempDir = os.tmpdir();
+                                const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
+                                if (fs.existsSync(tempFilePath)) {
+                                    fs.unlinkSync(tempFilePath);
+                                }
+                            } catch (cleanupError) {
+                                console.error(`❌ Failed to clean up temp file:`, cleanupError);
                             }
-                        } catch (cleanupError) {
-                            console.error(`❌ Failed to clean up temp file:`, cleanupError);
                         }
                     }
                 }
@@ -274,9 +300,26 @@ class AIJobProcessors {
             // Use different approaches based on file type for optimal results
             let extractedQuestions;
             if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                // For images, try direct vision-based question extraction first
-                console.log(`📸 Attempting direct vision-based question extraction...`);
+                // For images, try Document AI structured extraction first, then vision-based extraction
+                console.log(`📸 Attempting direct question extraction from image...`);
                 try {
+                    const { documentAI } = await import('../ai/documentai-service');
+
+                    if (documentAI.isConfigured()) {
+                        console.log(`� Trying Document AI structured data extraction...`);
+                        const mimeType = this.getMimeTypeFromFileType(fileType);
+
+                        // First try to get structured data which might contain better question separation
+                        const structuredData = await documentAI.extractStructuredData(fileBuffer, mimeType);
+
+                        if (structuredData.text && structuredData.text.length > extractedText.length) {
+                            console.log(`✅ Document AI structured extraction provided better text (${structuredData.text.length} chars vs ${extractedText.length} chars)`);
+                            extractedText = structuredData.text; // Use better quality text
+                        }
+                    }
+
+                    // Now try Gemini Vision for direct question extraction
+                    const { geminiAI } = await import('../ai/gemini-service');
                     const base64Image = fileBuffer.toString('base64');
                     const mimeType = this.getMimeTypeFromFileType(fileType);
 
@@ -296,6 +339,7 @@ class AIJobProcessors {
                 } catch (visionError) {
                     console.warn(`⚠️ Direct vision extraction failed, using text-based approach:`, visionError);
                     try {
+                        const { geminiAI } = await import('../ai/gemini-service');
                         extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
                         console.log(`✅ Text-based fallback found ${extractedQuestions.length} questions`);
                     } catch (textError) {
@@ -307,6 +351,7 @@ class AIJobProcessors {
                 // For PDFs and other text-based files, use text extraction
                 console.log(`📄 Using text-based question extraction for PDF/document...`);
                 try {
+                    const { geminiAI } = await import('../ai/gemini-service');
                     extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
                     console.log(`✅ Text-based extraction found ${extractedQuestions.length} questions`);
                 } catch (geminiError) {
@@ -314,9 +359,7 @@ class AIJobProcessors {
                     console.log(`🔄 Falling back to regex-based extraction...`);
                     extractedQuestions = await this.fallbackQuestionExtraction(extractedText);
                 }
-            }
-
-            job.progress = 60;
+            } job.progress = 60;
 
             // 4. Store extracted questions in database with enhanced AI concept analysis
             console.log(`💾 Saving ${extractedQuestions.length} questions to database with enhanced concept matching...`);
@@ -425,15 +468,6 @@ class AIJobProcessors {
         const questions: any[] = [];
 
         // Enhanced regex patterns for question detection - specifically for numbered questions
-        const patterns = [
-            // Pattern 1: "1. Question text 2. Next question" - most common in exams
-            /(\d+)\.\s+([^.]*?)(?=\s*\d+\.\s+|\s*$)/gi,
-            // Pattern 2: "1) Question text 2) Next question"
-            /(\d+)\)\s+([^)]*?)(?=\s*\d+\)\s+|\s*$)/gi,
-            // Pattern 3: "Question 1: Text Question 2: Next"
-            /Question\s*(\d+)[:\-.]?\s+([^.]*?)(?=\s*Question\s*\d+|\s*$)/gi,
-        ];
-
         console.log(`📝 Original text length: ${extractedText.length} characters`);
         console.log(`📄 Text to analyze: ${extractedText.substring(0, 300)}...`);
 

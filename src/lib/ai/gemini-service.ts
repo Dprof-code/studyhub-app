@@ -33,7 +33,7 @@ export class GeminiAIService {
             throw new Error('GEMINI_API_KEY environment variable is required');
         }
         this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
     }
 
     /**
@@ -42,7 +42,7 @@ export class GeminiAIService {
     async extractTextFromImage(base64Image: string, mimeType: string): Promise<string> {
         try {
             // Use Gemini 1.5 model which supports vision natively
-            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
 
             const prompt = `
 You are an expert document text extractor. Extract ALL text from this image, which appears to be an academic document, exam paper, or educational material.

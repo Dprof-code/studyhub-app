@@ -139,79 +139,53 @@ class AIJobProcessors {
                     throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
                 }
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                console.log(`🖼️ Processing image file with Gemini Vision AI...`);
+                console.log(`🖼️ Processing image file with OCR...`);
                 job.progress = 20;
 
                 try {
-                    // Import Gemini service early for vision processing
-                    const { geminiAI } = await import('../ai/gemini-service');
+                    // Use cross-platform temp directory
+                    const tempDir = os.tmpdir();
+                    const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
+                    console.log(`📁 Using temporary file path: ${tempFilePath}`);
+                    fs.writeFileSync(tempFilePath, fileBuffer);
 
-                    console.log(`🧠 Using Gemini Vision AI for direct text extraction from image...`);
+                    // Enhanced OCR configuration for better text extraction
+                    const config = {
+                        lang: 'eng',
+                        oem: 1, // LSTM-based OCR engine
+                        psm: 6, // Uniform block of text (better for exam papers)
+                        // Removed tessedit_char_whitelist to avoid command line issues
+                    };
 
-                    // Convert buffer to base64 for Gemini
-                    const base64Image = fileBuffer.toString('base64');
-                    const mimeType = this.getMimeTypeFromFileType(fileType);
+                    console.log(`🔧 Starting enhanced OCR with node-tesseract-ocr...`);
+                    console.log(`📊 OCR Config:`, config);
 
-                    console.log(`📊 Image details: ${mimeType}, size: ${fileBuffer.length} bytes`);
-
-                    // Use Gemini Vision to extract text directly from image
-                    const visionResult = await Promise.race([
-                        geminiAI.extractTextFromImage(base64Image, mimeType),
+                    const ocrResult = await Promise.race([
+                        tesseract.recognize(tempFilePath, config),
                         new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Gemini Vision processing timeout after 3 minutes')), 180000)
+                            setTimeout(() => reject(new Error('OCR processing timeout after 5 minutes')), 300000)
                         )
                     ]) as string;
 
-                    extractedText = visionResult;
-                    console.log(`✅ Gemini Vision processing complete, extracted ${extractedText.length} characters`);
-                    console.log(`📄 Raw Vision output preview:`, extractedText.substring(0, 500));
+                    extractedText = ocrResult;
+                    console.log(`✅ OCR processing complete, extracted ${extractedText.length} characters`);
+                    console.log(`📄 Raw OCR output preview:`, extractedText.substring(0, 500));
 
-                } catch (visionError) {
-                    console.error(`❌ Gemini Vision processing failed:`, visionError);
-                    console.log(`🔄 Falling back to traditional OCR...`);
-
+                    // Clean up temporary file
+                    fs.unlinkSync(tempFilePath);
+                } catch (ocrError) {
+                    console.error(`❌ OCR processing failed:`, ocrError);
+                    console.log(`🔄 Using fallback text for OCR failure`);
+                    extractedText = "Image file processed. OCR extraction failed due to timeout or technical issues. This may be due to poor image quality, large file size, or server limitations. Please try with a smaller, clearer image.";
+                    // Attempt to clean up if file exists
                     try {
-                        // Fallback to traditional OCR if Gemini Vision fails
                         const tempDir = os.tmpdir();
                         const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                        console.log(`📁 Using temporary file path for OCR fallback: ${tempFilePath}`);
-                        fs.writeFileSync(tempFilePath, fileBuffer);
-
-                        // Enhanced OCR configuration for better text extraction
-                        const config = {
-                            lang: 'eng',
-                            oem: 1, // LSTM-based OCR engine
-                            psm: 6, // Uniform block of text (better for exam papers)
-                        };
-
-                        console.log(`🔧 Starting fallback OCR with node-tesseract-ocr...`);
-
-                        const ocrResult = await Promise.race([
-                            tesseract.recognize(tempFilePath, config),
-                            new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('OCR processing timeout after 2 minutes')), 120000)
-                            )
-                        ]) as string;
-
-                        extractedText = ocrResult;
-                        console.log(`✅ Fallback OCR processing complete, extracted ${extractedText.length} characters`);
-
-                        // Clean up temporary file
-                        fs.unlinkSync(tempFilePath);
-                    } catch (ocrError) {
-                        console.error(`❌ Both Gemini Vision and OCR failed:`, ocrError);
-                        extractedText = "Image processing failed. Both AI vision and OCR extraction encountered errors. This may be due to poor image quality, unsupported format, or server limitations. Please try with a clearer, higher-resolution image in a standard format (PNG, JPG).";
-
-                        // Attempt to clean up if file exists
-                        try {
-                            const tempDir = os.tmpdir();
-                            const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                            if (fs.existsSync(tempFilePath)) {
-                                fs.unlinkSync(tempFilePath);
-                            }
-                        } catch (cleanupError) {
-                            console.error(`❌ Failed to clean up temp file:`, cleanupError);
+                        if (fs.existsSync(tempFilePath)) {
+                            fs.unlinkSync(tempFilePath);
                         }
+                    } catch (cleanupError) {
+                        console.error(`❌ Failed to clean up temp file:`, cleanupError);
                     }
                 }
             } else {
@@ -271,49 +245,18 @@ class AIJobProcessors {
             const existingConcepts = await this.getExistingCourseConcepts(resource.courseId);
             console.log(`� Found ${existingConcepts.length} existing concepts from course resources`);
 
-            // Use different approaches based on file type for optimal results
+            // Use Gemini to extract structured questions
             let extractedQuestions;
-            if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                // For images, try direct vision-based question extraction first
-                console.log(`📸 Attempting direct vision-based question extraction...`);
-                try {
-                    const base64Image = fileBuffer.toString('base64');
-                    const mimeType = this.getMimeTypeFromFileType(fileType);
+            try {
+                console.log(`🤖 Sending text to Gemini for question extraction...`);
+                extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
+                console.log(`✅ Gemini extracted ${extractedQuestions.length} questions`);
+            } catch (geminiError) {
+                console.error(`❌ Gemini extraction failed:`, geminiError);
+                console.log(`🔄 Falling back to regex-based extraction...`);
 
-                    extractedQuestions = await geminiAI.extractQuestionsFromImage(
-                        base64Image,
-                        mimeType,
-                        courseContext
-                    );
-                    console.log(`✅ Direct vision extraction found ${extractedQuestions.length} questions`);
-
-                    // If direct vision extraction didn't find enough questions, fall back to text-based approach
-                    if (extractedQuestions.length === 0 && extractedText.length > 100) {
-                        console.log(`🔄 Vision found no questions, trying text-based extraction as backup...`);
-                        extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
-                        console.log(`✅ Text-based backup extraction found ${extractedQuestions.length} questions`);
-                    }
-                } catch (visionError) {
-                    console.warn(`⚠️ Direct vision extraction failed, using text-based approach:`, visionError);
-                    try {
-                        extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
-                        console.log(`✅ Text-based fallback found ${extractedQuestions.length} questions`);
-                    } catch (textError) {
-                        console.error(`❌ Both vision and text extraction failed:`, textError);
-                        extractedQuestions = await this.fallbackQuestionExtraction(extractedText);
-                    }
-                }
-            } else {
-                // For PDFs and other text-based files, use text extraction
-                console.log(`📄 Using text-based question extraction for PDF/document...`);
-                try {
-                    extractedQuestions = await geminiAI.extractQuestionsFromText(extractedText, courseContext);
-                    console.log(`✅ Text-based extraction found ${extractedQuestions.length} questions`);
-                } catch (geminiError) {
-                    console.error(`❌ Text-based Gemini extraction failed:`, geminiError);
-                    console.log(`🔄 Falling back to regex-based extraction...`);
-                    extractedQuestions = await this.fallbackQuestionExtraction(extractedText);
-                }
+                // Fallback to improved regex extraction
+                extractedQuestions = await this.fallbackQuestionExtraction(extractedText);
             }
 
             job.progress = 60;
@@ -347,8 +290,7 @@ class AIJobProcessors {
                             marks: questionData.marks || 0,
                             difficulty: questionData.difficulty || 'MEDIUM',
                             aiAnalysis: {
-                                extractionMethod: fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/) ?
-                                    'gemini-vision-enhanced' : 'gemini-ai-enhanced',
+                                extractionMethod: 'gemini-ai-enhanced',
                                 ocrQuality: extractedText.length > 500 ? 'good' : extractedText.length > 200 ? 'fair' : 'poor',
                                 concepts: concepts,
                                 courseContext: courseContext,
@@ -356,12 +298,7 @@ class AIJobProcessors {
                                     existingConcepts: concepts.filter(c => c.isExisting).length,
                                     newConcepts: concepts.filter(c => !c.isExisting).length,
                                     totalCourseConcepts: existingConcepts.length
-                                },
-                                visionAnalysis: questionData.questionType ? {
-                                    questionType: questionData.questionType,
-                                    hasImage: questionData.hasImage || false,
-                                    pageSection: questionData.pageSection || 'unknown'
-                                } : undefined
+                                }
                             }
                         }
                     });
@@ -417,144 +354,95 @@ class AIJobProcessors {
     }
 
     /**
-     * Fallback question extraction using enhanced regex patterns
+     * Fallback question extraction using regex patterns
      */
     private async fallbackQuestionExtraction(extractedText: string): Promise<any[]> {
-        console.log(`🔄 Using enhanced fallback regex-based question extraction...`);
+        console.log(`🔄 Using fallback regex-based question extraction...`);
 
         const questions: any[] = [];
 
-        // Enhanced regex patterns for question detection - specifically for numbered questions
+        // Enhanced regex patterns for question detection
         const patterns = [
-            // Pattern 1: "1. Question text 2. Next question" - most common in exams
-            /(\d+)\.\s+([^.]*?)(?=\s*\d+\.\s+|\s*$)/gi,
-            // Pattern 2: "1) Question text 2) Next question"
-            /(\d+)\)\s+([^)]*?)(?=\s*\d+\)\s+|\s*$)/gi,
-            // Pattern 3: "Question 1: Text Question 2: Next"
-            /Question\s*(\d+)[:\-.]?\s+([^.]*?)(?=\s*Question\s*\d+|\s*$)/gi,
+            /(\d+)\.\s*([^.]+(?:\.[^.]*)*?)(?=\d+\.|$)/gi, // 1. 2. 3. format
+            /(\d+)\)\s*([^)]+(?:\)[^)]*)*?)(?=\d+\)|$)/gi, // 1) 2) 3) format
+            /Question\s*(\d+)[:\-.]?\s*([^.]+(?:\.[^.]*)*?)(?=Question\s*\d+|$)/gi, // Question 1: format
         ];
 
-        console.log(`📝 Original text length: ${extractedText.length} characters`);
-        console.log(`📄 Text to analyze: ${extractedText.substring(0, 300)}...`);
+        for (const pattern of patterns) {
+            let match;
+            pattern.lastIndex = 0;
+            while ((match = pattern.exec(extractedText)) !== null) {
+                const questionNumber = match[1];
+                const questionText = match[2].trim();
 
-        // Try the most specific pattern first (numbered with periods)
-        const numberedPattern = /(\d+)\.\s+([^]*?)(?=\s*\d+\.\s+|$)/g;
-        let match;
-
-        // Reset regex
-        numberedPattern.lastIndex = 0;
-
-        while ((match = numberedPattern.exec(extractedText)) !== null) {
-            const questionNumber = match[1];
-            let questionText = match[2].trim();
-
-            // Clean up the question text
-            questionText = questionText
-                .replace(/\s+/g, ' ') // Normalize spaces
-                .replace(/\n+/g, ' ') // Replace newlines with spaces
-                .trim();
-
-            // Skip very short questions or header-like text
-            if (questionText.length < 15 ||
-                questionText.toUpperCase().includes('DEPARTMENT') ||
-                questionText.toUpperCase().includes('TIME ALLOWED') ||
-                questionText.toUpperCase().includes('TEST DATE')) {
-                console.log(`⏭️ Skipping question ${questionNumber}: too short or header-like`);
-                continue;
-            }
-
-            // Extract marks if present in various formats
-            const marksPatterns = [
-                /\((\d+)\s*marks?\)/i,
-                /\[(\d+)\s*marks?\]/i,
-                /(\d+)\s*marks?\b/i
-            ];
-
-            let marks = 0;
-            for (const pattern of marksPatterns) {
-                const marksMatch = questionText.match(pattern);
-                if (marksMatch) {
-                    marks = parseInt(marksMatch[1]);
-                    break;
+                // Skip very short or header-like text
+                if (questionText.length < 10 ||
+                    questionText.toUpperCase().includes('DEPARTMENT') ||
+                    questionText.toUpperCase().includes('TIME ALLOWED')) {
+                    continue;
                 }
+
+                // Extract marks if present
+                const marksMatch = questionText.match(/\((\d+)\s*marks?\)/i);
+                const marks = marksMatch ? parseInt(marksMatch[1]) : 0;
+
+                questions.push({
+                    questionNumber,
+                    questionText,
+                    marks,
+                    difficulty: 'MEDIUM',
+                    concepts: []
+                });
             }
-
-            console.log(`✅ Found question ${questionNumber}: ${questionText.substring(0, 80)}... (${marks} marks)`);
-
-            questions.push({
-                questionNumber,
-                questionText,
-                marks,
-                difficulty: 'MEDIUM',
-                concepts: [],
-                questionType: 'short_answer' // Default type for fallback
-            });
         }
 
-        // If the numbered pattern didn't work, try splitting by line breaks and finding questions
+        // If still no questions, try splitting by numbers at start of lines
         if (questions.length === 0) {
-            console.log(`🔄 Numbered pattern failed, trying line-based extraction...`);
-
-            const lines = extractedText.split(/\r?\n/);
+            const lines = extractedText.split('\n');
             let currentQuestion = '';
             let currentNumber = '';
 
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
+            for (const line of lines) {
+                const trimmed = line.trim();
+                const numberMatch = trimmed.match(/^(\d+)[\).\-:\s]/);
 
-                // Check if line starts with a number and looks like a question
-                const lineMatch = line.match(/^(\d+)\.\s*(.+)/);
-
-                if (lineMatch) {
-                    // Save previous question if exists
+                if (numberMatch) {
+                    // Save previous question
                     if (currentQuestion && currentNumber) {
-                        const cleanedQuestion = currentQuestion.trim();
-                        if (cleanedQuestion.length > 15) {
-                            questions.push({
-                                questionNumber: currentNumber,
-                                questionText: cleanedQuestion,
-                                marks: 0,
-                                difficulty: 'MEDIUM',
-                                concepts: [],
-                                questionType: 'short_answer'
-                            });
-                        }
+                        questions.push({
+                            questionNumber: currentNumber,
+                            questionText: currentQuestion.trim(),
+                            marks: 0,
+                            difficulty: 'MEDIUM',
+                            concepts: []
+                        });
                     }
 
                     // Start new question
-                    currentNumber = lineMatch[1];
-                    currentQuestion = lineMatch[2];
-                } else if (currentQuestion && line.length > 0 && !line.match(/^\d+\./)) {
-                    // Continue current question
-                    currentQuestion += ' ' + line;
+                    currentNumber = numberMatch[1];
+                    currentQuestion = trimmed.replace(numberMatch[0], '');
+                } else if (currentQuestion) {
+                    currentQuestion += ' ' + trimmed;
                 }
             }
 
             // Don't forget the last question
             if (currentQuestion && currentNumber) {
-                const cleanedQuestion = currentQuestion.trim();
-                if (cleanedQuestion.length > 15) {
-                    questions.push({
-                        questionNumber: currentNumber,
-                        questionText: cleanedQuestion,
-                        marks: 0,
-                        difficulty: 'MEDIUM',
-                        concepts: [],
-                        questionType: 'short_answer'
-                    });
-                }
+                questions.push({
+                    questionNumber: currentNumber,
+                    questionText: currentQuestion.trim(),
+                    marks: 0,
+                    difficulty: 'MEDIUM',
+                    concepts: []
+                });
             }
         }
 
-        console.log(`✅ Enhanced fallback extraction found ${questions.length} questions`);
-
-        // Log each question for debugging
-        questions.forEach((q, index) => {
-            console.log(`📝 Question ${index + 1} (${q.questionNumber}): ${q.questionText.substring(0, 60)}...`);
-        });
-
+        console.log(`✅ Fallback extraction found ${questions.length} questions`);
         return questions;
-    }    /**
+    }
+
+    /**
      * Store concepts and create question-concept relationships
      */
     private async storeQuestionConcepts(questionId: number, concepts: any[], resourceId: number): Promise<void> {
@@ -724,24 +612,6 @@ class AIJobProcessors {
             console.error(`❌ Error enhancing concepts:`, error);
             return aiConcepts; // Return original if enhancement fails
         }
-    }
-
-    /**
-     * Get MIME type from file extension
-     */
-    private getMimeTypeFromFileType(fileType: string): string {
-        const type = fileType.toLowerCase();
-        const mimeTypes: { [key: string]: string } = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'bmp': 'image/bmp',
-            'tiff': 'image/tiff',
-            'tif': 'image/tiff'
-        };
-
-        return mimeTypes[type] || 'image/jpeg';
     }
 
     private async identifyConceptsProcessor(job: any): Promise<any> {

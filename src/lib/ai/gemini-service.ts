@@ -33,10 +33,126 @@ export class GeminiAIService {
             throw new Error('GEMINI_API_KEY environment variable is required');
         }
         this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+        this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     }
 
     /**
+     * Extract text directly from image using Gemini Vision
+     */
+    async extractTextFromImage(base64Image: string, mimeType: string): Promise<string> {
+        try {
+            // Use Gemini 1.5 model which supports vision natively
+            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+            const prompt = `
+You are an expert document text extractor. Extract ALL text from this image, which appears to be an academic document, exam paper, or educational material.
+
+Instructions:
+1. Extract every single piece of text visible in the image
+2. Maintain the original structure and formatting as much as possible
+3. Preserve question numbers, parts (a, b, c), and any numbering
+4. Include all instructions, headers, and content
+5. If there are mathematical symbols or formulas, describe them clearly
+6. If text is unclear or partially obscured, make your best interpretation
+7. Do not add any commentary or explanations - just extract the text
+
+Return only the extracted text without any additional formatting or comments.
+            `;
+
+            const result = await visionModel.generateContent([
+                prompt,
+                {
+                    inlineData: {
+                        data: base64Image,
+                        mimeType: mimeType
+                    }
+                }
+            ]);
+
+            const extractedText = result.response.text();
+
+            if (!extractedText || extractedText.trim().length < 10) {
+                throw new Error('Gemini Vision returned insufficient text content');
+            }
+
+            console.log(`🧠 Gemini Vision extracted ${extractedText.length} characters from image`);
+            return extractedText;
+
+        } catch (error) {
+            console.error('❌ Gemini Vision text extraction failed:', error);
+            throw new Error(`Vision text extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }    /**
+     * Extract questions directly from image using Gemini Vision
+     */
+    async extractQuestionsFromImage(base64Image: string, mimeType: string, courseContext?: string): Promise<ExtractedQuestion[]> {
+        try {
+            // Use Gemini 1.5 model which supports vision natively
+            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+            const prompt = `
+You are an expert academic question extractor with computer vision capabilities. Analyze this image which appears to be an exam paper, past question paper, or academic test.
+
+Course Context: ${courseContext || 'General Academic'}
+
+Extract individual questions directly from the image and provide detailed analysis in JSON format:
+
+{
+  "questions": [
+    {
+      "questionNumber": "1a" or "Q1" or null if not clear,
+      "questionText": "Complete question text exactly as it appears",
+      "marks": number or null if not visible,
+      "difficulty": "EASY" | "MEDIUM" | "HARD" | "EXPERT",
+      "concepts": ["concept1", "concept2", "concept3"],
+      "questionType": "multiple_choice" | "short_answer" | "essay" | "calculation" | "diagram" | "other",
+      "hasImage": true if question contains diagrams/images,
+      "pageSection": "top" | "middle" | "bottom" | "full_page"
+    }
+  ]
+}
+
+Guidelines:
+1. Extract each question as a separate, complete entity
+2. Include sub-questions as separate entries (e.g., 1a, 1b, 1c)
+3. Estimate difficulty based on question complexity, required knowledge depth, and academic level
+4. Identify 2-6 key academic concepts per question
+5. Detect question types based on structure and requirements
+6. Note if questions include diagrams, charts, or visual elements
+7. If no clear questions are found, return empty array
+8. Focus on actual questions, ignore headers, instructions, or administrative text
+9. Preserve exact wording and mathematical notation
+10. If marks are in brackets like (5 marks), extract the number
+
+Return only valid JSON without any explanation or markdown formatting.
+            `;
+
+            const result = await visionModel.generateContent([
+                prompt,
+                {
+                    inlineData: {
+                        data: base64Image,
+                        mimeType: mimeType
+                    }
+                }
+            ]);
+
+            const response = result.response.text();
+
+            // Clean and parse JSON response
+            const cleanedResponse = response.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(cleanedResponse);
+
+            const questions = parsed.questions || [];
+            console.log(`🧠 Gemini Vision extracted ${questions.length} questions directly from image`);
+
+            return questions;
+
+        } catch (error) {
+            console.error('❌ Gemini Vision question extraction failed:', error);
+            throw new Error(`Vision question extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }    /**
      * Extract individual questions from raw text
      */
     async extractQuestionsFromText(rawText: string, courseContext?: string): Promise<ExtractedQuestion[]> {

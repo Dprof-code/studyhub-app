@@ -6,7 +6,6 @@ import tesseract from 'node-tesseract-ocr';
 
 // Configure PDF.js worker
 if (typeof window === 'undefined') {
-    // Server-side configuration
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 }
 
@@ -41,9 +40,6 @@ class AIJobProcessors {
         // Simple constructor without external dependencies
     }
 
-    /**
-     * Initialize all job processors
-     */
     init(): void {
         console.log('🔧 Initializing AI Job Processors...');
 
@@ -56,9 +52,6 @@ class AIJobProcessors {
         console.log('📋 Registered processors:', Object.values(JOB_TYPES));
     }
 
-    /**
-     * Extract questions from uploaded documents
-     */
     public async extractQuestionsProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType } = job.data;
 
@@ -148,15 +141,15 @@ class AIJobProcessors {
                 job.progress = 20;
 
                 try {
-                    // Save the file buffer to a temporary file (node-tesseract-ocr requires a file path)
-                    const tempFilePath = `./temp_image_${job.id}.png`;
+                    // Save the file buffer to a temporary file
+                    const tempFilePath = `/tmp/temp_image_${job.id}.png`;
                     fs.writeFileSync(tempFilePath, fileBuffer);
 
                     // Configure node-tesseract-ocr
                     const config = {
                         lang: 'eng',
-                        oem: 1, // Use LSTM-based OCR engine
-                        psm: 3, // Automatic page segmentation with OSD
+                        oem: 1, // LSTM-based OCR engine
+                        psm: 3, // Automatic page segmentation
                     };
 
                     console.log(`🔧 Starting OCR with node-tesseract-ocr...`);
@@ -181,63 +174,160 @@ class AIJobProcessors {
                 throw new Error(`Unsupported file type for question extraction: ${fileType}`);
             }
 
+            // 2. Clean up OCR text
+            console.log(`🧹 Cleaning up OCR text...`);
+            extractedText = extractedText
+                .replace(/©/g, 'c)') // Fix common OCR error for 'c)'
+                .replace(/Desoribe/g, 'Describe') // Fix common spelling errors
+                .replace(/itswarious/g, 'its various')
+                .replace(/\s+/g, ' ') // Normalize multiple spaces
+                .replace(/\r\n/g, '\n') // Normalize line breaks
+                .trim();
+
             console.log(`📄 Extracted text preview: ${extractedText.substring(0, 200)}...`);
             job.progress = 40;
 
-            // 2. Extract questions using regex (e.g., lines starting with number or Q)
+            // 3. Extract questions using improved regex
             console.log(`🔍 Extracting questions from text...`);
-            const questionRegex = /^(?:Q\.?|Question)?\s*(\d{1,2})[\).\-:]?\s+([\s\S]+?)(?=\n(?:Q\.?|Question)?\s*\d{1,2}[\).\-:]?|$)/gim;
+
+            // Regex to match various question numbering formats
+            const questionRegex = /^(?:Q\.?|Question)?\s*((?:\d+[a-z]?)|\([ivx]+\))\s*[\).\-:]?\s*([\s\S]+?)(?=\n*(?:(?:Q\.?|Question)?\s*(?:(?:\d+[a-z]?)|\([ivx]+\))\s*[\).\-:]?)|$)/gim;
+
+            // Keywords to filter out headers and instructions
+            const headerKeywords = [
+                'SCHOOL OF', 'DEPARTMENT OF', 'COURSE CODE', 'COURSE TITLE',
+                'COURSE UNITS', 'INSTRUCTION:', 'SECTION', 'TIME ALLOWED',
+                'EXAMINATIONS', 'SEMESTER'
+            ];
+
             const questions: any[] = [];
             let match;
-            let qNum = 1;
+            let currentParentQuestion: any = null;
+
             while ((match = questionRegex.exec(extractedText)) !== null) {
-                questions.push({
-                    questionText: match[2].trim(),
-                    questionNumber: match[1] || String(qNum),
-                    marks: 0,
-                    difficulty: 'MEDIUM'
-                });
-                qNum++;
+                const questionNumber = match[1];
+                let questionText = match[2].trim();
+
+                // Skip headers and instructions
+                if (headerKeywords.some(keyword => questionText.toUpperCase().includes(keyword))) {
+                    console.log(`⏭️ Skipping header: ${questionText.substring(0, 50)}...`);
+                    continue;
+                }
+
+                // Remove trailing marks or other metadata
+                questionText = questionText.replace(/\(\s*\d+\s*marks?\s*\)$/i, '').trim();
+
+                // Skip short lines that are unlikely to be questions
+                if (questionText.length < 20) {
+                    console.log(`⏭️ Skipping short line: ${questionText}`);
+                    continue;
+                }
+
+                // Determine if this is a parent question or sub-question
+                const isSubQuestion = /^[a-z]\)$|\([ivx]+\)$/i.test(questionNumber);
+
+                if (!isSubQuestion) {
+                    // New parent question
+                    currentParentQuestion = {
+                        questionNumber,
+                        questionText,
+                        subQuestions: [],
+                        marks: 0,
+                        difficulty: 'MEDIUM'
+                    };
+                    questions.push(currentParentQuestion);
+                } else if (currentParentQuestion) {
+                    // Add as sub-question to the current parent
+                    currentParentQuestion.subQuestions.push({
+                        questionNumber,
+                        questionText
+                    });
+                } else {
+                    // Treat as standalone if no parent (fallback)
+                    questions.push({
+                        questionNumber,
+                        questionText,
+                        subQuestions: [],
+                        marks: 0,
+                        difficulty: 'MEDIUM'
+                    });
+                }
             }
 
-            // Fallback: If no matches, split by lines and treat each as a question
+            // Fallback: Process remaining text for questions if regex fails
             if (questions.length === 0) {
                 console.log(`⚠️ No structured questions found, using line-by-line fallback`);
-                extractedText.split('\n').forEach((line: string, idx: number) => {
-                    if (line.trim().length > 20) {
-                        questions.push({
-                            questionText: line.trim(),
-                            questionNumber: String(idx + 1),
+                const lines = extractedText.split('\n');
+                let currentQuestion: any = null;
+
+                lines.forEach((line: string, idx: number) => {
+                    line = line.trim();
+                    if (line.length < 20 || headerKeywords.some(keyword => line.toUpperCase().includes(keyword))) {
+                        return;
+                    }
+
+                    const numberMatch = line.match(/^(?:\d+[a-z]?)|\([ivx]+\)/i);
+                    if (numberMatch) {
+                        currentQuestion = {
+                            questionNumber: numberMatch[0],
+                            questionText: line.replace(numberMatch[0], '').trim(),
+                            subQuestions: [],
                             marks: 0,
                             difficulty: 'MEDIUM'
-                        });
+                        };
+                        questions.push(currentQuestion);
+                    } else if (currentQuestion) {
+                        // Append to the current question's text
+                        currentQuestion.questionText += ' ' + line;
                     }
                 });
             }
 
-            console.log(`✅ Found ${questions.length} questions`);
+            // Clean up question text and assign marks
+            questions.forEach(question => {
+                // Extract marks from question text (e.g., "(3 marks)")
+                const marksMatch = question.questionText.match(/\((\d+)\s*marks?\)/i);
+                if (marksMatch) {
+                    question.marks = parseInt(marksMatch[1], 10);
+                    question.questionText = question.questionText.replace(marksMatch[0], '').trim();
+                }
+
+                // Clean sub-questions
+                question.subQuestions.forEach((sub: any) => {
+                    const subMarksMatch = sub.questionText.match(/\((\d+)\s*marks?\)/i);
+                    if (subMarksMatch) {
+                        sub.marks = parseInt(subMarksMatch[1], 10);
+                        sub.questionText = sub.questionText.replace(subMarksMatch[0], '').trim();
+                    }
+                });
+            });
+
+            console.log(`✅ Found ${questions.length} questions with ${questions.reduce((sum, q) => sum + q.subQuestions.length, 0)} sub-questions`);
             job.progress = 60;
 
-            // 3. Store extracted questions in database
+            // 4. Store extracted questions in database
             console.log(`💾 Saving questions to database...`);
             const savedQuestions = await Promise.all(
                 questions.map(async (questionData) => {
-                    return await db.extractedQuestion.create({
+                    const question = await db.extractedQuestion.create({
                         data: {
                             resourceId,
                             questionText: questionData.questionText,
                             questionNumber: questionData.questionNumber,
                             marks: questionData.marks,
                             difficulty: questionData.difficulty as any,
-                            aiAnalysis: {}
+                            aiAnalysis: {
+                                subQuestions: questionData.subQuestions
+                            }
                         }
                     });
+                    return question;
                 })
             );
 
             job.progress = 80;
 
-            // 4. Update resource status
+            // 5. Update resource status
             console.log(`📊 Updating resource status...`);
             await db.resource.update({
                 where: { id: resourceId },
@@ -276,9 +366,6 @@ class AIJobProcessors {
         }
     }
 
-    /**
-     * Identify concepts from extracted questions
-     */
     private async identifyConceptsProcessor(job: any): Promise<any> {
         try {
             console.log(`🧠 Starting concept identification for job ${job.id}`);
@@ -295,7 +382,6 @@ class AIJobProcessors {
             // Store concepts in database
             const savedConcepts = await Promise.all(
                 mockConcepts.map(async (conceptData) => {
-                    // Create or find existing concept
                     let concept = await db.concept.findFirst({
                         where: { name: conceptData.name }
                     });
@@ -327,9 +413,6 @@ class AIJobProcessors {
         }
     }
 
-    /**
-     * Update RAG knowledge base index
-     */
     private async updateRAGIndexProcessor(job: any): Promise<any> {
         const { resourceId, content, concepts } = job.data;
 
@@ -345,7 +428,7 @@ class AIJobProcessors {
             await db.resource.update({
                 where: { id: resourceId },
                 data: {
-                    ragContent: content.substring(0, 2000) // Store preview
+                    ragContent: content.substring(0, 2000)
                 }
             });
 
@@ -362,9 +445,6 @@ class AIJobProcessors {
         }
     }
 
-    /**
-     * Complete document analysis workflow
-     */
     private async analyzeDocumentProcessor(job: any): Promise<any> {
         const { resourceId, filePath, fileType, enableAIAnalysis } = job.data;
 
@@ -388,7 +468,6 @@ class AIJobProcessors {
                     }
                 });
             } catch {
-                // Job might already exist, update it
                 await db.aIProcessingJob.update({
                     where: { id: job.id },
                     data: {
@@ -409,7 +488,7 @@ class AIJobProcessors {
 
             job.progress = 40;
 
-            // Step 2: Identify concepts (if questions were found)
+            // Step 2: Identify concepts
             let conceptResult = null;
             if (extractResult.questions && extractResult.questions.length > 0) {
                 const questions = extractResult.questions.map((q: any) => q.questionText);
@@ -438,7 +517,7 @@ class AIJobProcessors {
                 questionsExtracted: extractResult.questionsExtracted,
                 conceptsIdentified: conceptResult?.conceptsIdentified || 0,
                 ragIndexed: ragResult.indexed,
-                resourceMatches: 5 // Mock value
+                resourceMatches: 5
             };
 
             await db.aIProcessingJob.update({
@@ -459,7 +538,6 @@ class AIJobProcessors {
         } catch (error) {
             console.error(`Error in document analysis for resource ${resourceId}:`, error);
 
-            // Update job status on error
             await db.aIProcessingJob.update({
                 where: { id: job.id },
                 data: {
@@ -478,12 +556,10 @@ export const aiJobProcessors = new AIJobProcessors();
 
 // Helper function to queue AI analysis
 export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
-    // In serverless environment, we'll store the job in database and process immediately
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     console.log(`🚀 Creating AI analysis job: ${jobId}`);
 
-    // Create database record
     await db.aIProcessingJob.create({
         data: {
             id: jobId,
@@ -496,8 +572,6 @@ export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
 
     console.log(`📝 Created database job record: ${jobId}`);
 
-    // For serverless deployment, we'll process the job immediately in background
-    // This avoids the issue of job being lost when the instance shuts down
     processJobInBackground(jobId, data);
 
     return {
@@ -516,7 +590,6 @@ export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
 export async function getJobStatus(jobId: string) {
     console.log(`📊 Getting job status for: ${jobId}`);
 
-    // Try to get from database first
     const dbJob = await db.aIProcessingJob.findUnique({
         where: { id: jobId },
         include: {
@@ -538,7 +611,7 @@ export async function getJobStatus(jobId: string) {
             status: dbJob.status.toLowerCase(),
             progress: dbJob.progress,
             createdAt: dbJob.createdAt,
-            updatedAt: dbJob.completedAt || dbJob.startedAt || dbJob.createdAt, // Use completion/start time as update time
+            updatedAt: dbJob.completedAt || dbJob.startedAt || dbJob.createdAt,
             attempts: 0,
             maxAttempts: 2,
             result: dbJob.results,
@@ -546,7 +619,6 @@ export async function getJobStatus(jobId: string) {
         };
     }
 
-    // Fallback to in-memory queue
     return await jobQueue.getJob(jobId);
 }
 
@@ -556,7 +628,6 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
     console.log(`📄 Processing data:`, JSON.stringify(data, null, 2));
 
     try {
-        // Update status to processing
         await db.aIProcessingJob.update({
             where: { id: jobId },
             data: {
@@ -568,10 +639,8 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         console.log(`📝 Processing document analysis for resource ${data.resourceId}`);
 
-        // Create an AI processor instance to use the real extraction logic
         const processor = new AIJobProcessors();
 
-        // Update progress to show we're starting extraction
         await db.aIProcessingJob.update({
             where: { id: jobId },
             data: { progress: 20 }
@@ -579,7 +648,6 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         console.log(`🔧 Created processor instance, starting extraction...`);
 
-        // Create a mock job object for the processor
         const mockJob = {
             id: jobId,
             data: {
@@ -592,8 +660,7 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         console.log(`📝 Mock job data:`, JSON.stringify(mockJob, null, 2));
 
-        // Add timeout to prevent hanging
-        const extractionTimeout = 300000; // 5 minutes timeout
+        const extractionTimeout = 300000;
         const extractionPromise = processor.extractQuestionsProcessor(mockJob);
 
         let extractResult;
@@ -616,8 +683,6 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
             data: { progress: 60 }
         });
 
-        // Use real concept identification (when implemented)
-        // For now, still using mock concepts but will be replaced with real AI later
         const mockConcepts = [
             { name: 'Linear Algebra', description: 'Mathematical concepts involving vectors and matrices', category: 'Mathematics' },
             { name: 'Data Structures', description: 'Ways of organizing and storing data', category: 'Computer Science' }
@@ -628,8 +693,6 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
             data: { progress: 80 }
         });
 
-        // The resource status is already updated by the extractQuestionsProcessor
-        // Complete the job
         const finalResults = {
             questionsExtracted: extractResult.questionsExtracted || 0,
             conceptsIdentified: mockConcepts.length,

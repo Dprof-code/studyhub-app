@@ -7,8 +7,29 @@ export class DocumentAIService {
     private processorId: string;
 
     constructor() {
-        // Initialize Document AI client
-        this.client = new DocumentProcessorServiceClient();
+        // Initialize Document AI client with credentials from environment variables
+        const credentials = {
+            type: 'service_account',
+            project_id: process.env.GOOGLE_CLOUD_PROJECT_ID,
+            private_key_id: process.env.GOOGLE_CLOUD_PRIVATE_KEY_ID,
+            private_key: process.env.GOOGLE_CLOUD_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+            client_id: process.env.GOOGLE_CLOUD_CLIENT_ID,
+            auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+            token_uri: 'https://oauth2.googleapis.com/token',
+            auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+            universe_domain: 'googleapis.com'
+        };
+
+        // Initialize client with credentials from environment variables
+        if (process.env.GOOGLE_CLOUD_PRIVATE_KEY && process.env.GOOGLE_CLOUD_CLIENT_EMAIL) {
+            this.client = new DocumentProcessorServiceClient({
+                credentials: credentials
+            });
+        } else {
+            // Fallback to default credential chain (GOOGLE_APPLICATION_CREDENTIALS file)
+            this.client = new DocumentProcessorServiceClient();
+        }
 
         // Configuration from environment variables
         this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || '';
@@ -84,7 +105,9 @@ export class DocumentAIService {
                     console.log('   - GOOGLE_CLOUD_PROJECT_ID');
                     console.log('   - DOCUMENT_AI_PROCESSOR_ID');
                     console.log('   - DOCUMENT_AI_LOCATION (optional, defaults to "us")');
-                    console.log('   - GOOGLE_APPLICATION_CREDENTIALS (path to service account key)');
+                    console.log('   And either:');
+                    console.log('   - GOOGLE_CLOUD_PRIVATE_KEY + GOOGLE_CLOUD_CLIENT_EMAIL (recommended)');
+                    console.log('   - OR GOOGLE_APPLICATION_CREDENTIALS (path to service account key file)');
                 }
             }
 
@@ -246,7 +269,8 @@ export class DocumentAIService {
      * Check if Document AI is properly configured
      */
     isConfigured(): boolean {
-        return !!(this.projectId && this.processorId && process.env.GOOGLE_APPLICATION_CREDENTIALS);
+        return !!(this.projectId && this.processorId &&
+            (process.env.GOOGLE_CLOUD_PRIVATE_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS));
     }
 
     /**
@@ -256,8 +280,11 @@ export class DocumentAIService {
         return {
             hasProjectId: !!this.projectId,
             hasProcessorId: !!this.processorId,
-            hasCredentials: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
+            hasPrivateKey: !!process.env.GOOGLE_CLOUD_PRIVATE_KEY,
+            hasClientEmail: !!process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+            hasCredentialsFile: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
             location: this.location,
+            authMethod: process.env.GOOGLE_CLOUD_PRIVATE_KEY ? 'environment_variables' : 'credentials_file',
             isFullyConfigured: this.isConfigured()
         };
     }

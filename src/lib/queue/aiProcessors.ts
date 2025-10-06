@@ -145,7 +145,7 @@ class AIJobProcessors {
                     if (typeof window === 'undefined') {
                         console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
                         pdfjsLib.GlobalWorkerOptions.workerPort = null;
-                        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs-dist/build/pdf.worker.js'; // Fake path
                     }
 
                     const data = new Uint8Array(fileBuffer);
@@ -157,7 +157,7 @@ class AIJobProcessors {
                         maxImageSize: 1024 * 1024, // 1MB max image size
                         disableFontFace: true, // Disable font loading for speed
                         disableRange: true, // Disable range requests
-                        disableStream: true // Disable streaming
+                        disableStream: true
                     });
 
                     // Add comprehensive timeout to PDF processing

@@ -7,15 +7,10 @@ import tesseract from 'node-tesseract-ocr';
 import * as os from 'os';
 import * as path from 'path';
 
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist'; // Use root for types
 import '@ungap/with-resolvers';
 
-// Configure PDF.js for server-side processing
-if (typeof window === 'undefined') {
-    console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
-    pdfjsLib.GlobalWorkerOptions.workerPort = null; // Explicitly disable worker
-    pdfjsLib.GlobalWorkerOptions.workerSrc = ''; // Ensure no workerSrc is set
-}
+console.log('Loaded pdfjs-dist version:', require('pdfjs-dist/package.json').version);
 
 // Job data interfaces
 export interface ExtractQuestionsJobData {
@@ -145,6 +140,14 @@ class AIJobProcessors {
                 job.progress = 20;
 
                 try {
+                    const pdfjsLibLegacy = await import('pdfjs-dist');
+                    const pdfjsLib = pdfjsLibLegacy; // Use legacy build at runtime
+                    if (typeof window === 'undefined') {
+                        console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
+                        pdfjsLib.GlobalWorkerOptions.workerPort = null;
+                        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                    }
+
                     const data = new Uint8Array(fileBuffer);
                     console.log(`🔧 Creating PDF loading task...`);
 

@@ -26,7 +26,6 @@ const nextConfig: NextConfig = {
       };
     }
 
-    // Configure PDF.js for server-side processing
     if (isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,

@@ -26,6 +26,15 @@ const nextConfig: NextConfig = {
       };
     }
 
+    // Configure PDF.js for server-side processing
+    if (isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        'pdfjs-dist/build/pdf.worker': false,
+        'pdfjs-dist/legacy/build/pdf.worker': false,
+      };
+    }
+
     // Copy Tesseract.js worker files
     config.module.rules.push({
       test: /\.worker\.js$/,

@@ -2,15 +2,19 @@ import { jobQueue, JOB_TYPES } from './jobQueue';
 import { db } from '../dbconfig';
 import { geminiAI } from '../ai/gemini-service';
 import { documentAI } from '../ai/documentai-service';
-import * as pdfjsLib from 'pdfjs-dist';
 import * as fs from 'fs';
 import tesseract from 'node-tesseract-ocr';
 import * as os from 'os';
 import * as path from 'path';
 
-// Configure PDF.js worker
+import * as pdfjsLib from 'pdfjs-dist';
+import '@ungap/with-resolvers';
+
+// Configure PDF.js for server-side processing
 if (typeof window === 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+    console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
+    pdfjsLib.GlobalWorkerOptions.workerPort = null; // Explicitly disable worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ''; // Ensure no workerSrc is set
 }
 
 // Job data interfaces
@@ -83,20 +87,48 @@ class AIJobProcessors {
             let extractedText = '';
             let fileBuffer: Buffer;
 
-            // Handle both local files and URLs (like Cloudinary) with timeout
+            // Handle both local files and URLs (like Cloudinary) with enhanced timeout
             if (filePath.startsWith('http')) {
                 console.log(`📥 Downloading file from URL: ${filePath}`);
+                console.log(`⏰ Starting download with 120s timeout...`);
 
-                const downloadPromise = fetch(filePath, {
-                    signal: AbortSignal.timeout(30000) // 30 second timeout
-                });
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => {
+                        controller.abort();
+                        console.log('⏰ Download timeout reached (120s)');
+                    }, 120000); // 2 minute timeout for download
 
-                const response = await downloadPromise;
-                if (!response.ok) {
-                    throw new Error(`Failed to download file: ${response.statusText}`);
+                    const response = await fetch(filePath, {
+                        signal: controller.signal,
+                        headers: {
+                            'Accept': 'application/pdf,application/*,*/*'
+                        }
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+                    }
+
+                    const contentLength = response.headers.get('content-length');
+                    const fileSize = contentLength ? parseInt(contentLength) : 0;
+                    console.log(`📊 File size: ${fileSize > 0 ? (fileSize / 1024 / 1024).toFixed(2) + ' MB' : 'unknown'}`);
+
+                    if (fileSize > 50 * 1024 * 1024) { // 50MB limit
+                        throw new Error('File too large for processing (>50MB). Please use a smaller file.');
+                    }
+
+                    fileBuffer = Buffer.from(await response.arrayBuffer());
+                    console.log(`✅ Downloaded file successfully, actual size: ${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+
+                } catch (error) {
+                    if (error instanceof Error && error.name === 'AbortError') {
+                        throw new Error('File download timeout. The file may be too large or the connection is slow.');
+                    }
+                    throw error;
                 }
-                fileBuffer = Buffer.from(await response.arrayBuffer());
-                console.log(`✅ Downloaded file, size: ${fileBuffer.length} bytes`);
             } else {
                 // Read local file
                 console.log(`📁 Reading local file: ${filePath}`);
@@ -107,37 +139,92 @@ class AIJobProcessors {
                 console.log(`✅ Read local file, size: ${fileBuffer.length} bytes`);
             }
 
-            // 1. Extract text from PDF or image
+            // 1. Extract text from PDF or image with progressive processing
             if (fileType.toLowerCase().includes('pdf')) {
-                console.log(`📖 Processing PDF file...`);
+                console.log(`📖 Processing PDF file (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)...`);
                 job.progress = 20;
 
                 try {
                     const data = new Uint8Array(fileBuffer);
-                    const loadingTask = pdfjsLib.getDocument({ data });
+                    console.log(`🔧 Creating PDF loading task...`);
 
-                    // Add timeout to PDF processing
+                    const loadingTask = pdfjsLib.getDocument({
+                        data,
+                        verbosity: 0, // Reduce logging
+                        maxImageSize: 1024 * 1024, // 1MB max image size
+                        disableFontFace: true, // Disable font loading for speed
+                        disableRange: true, // Disable range requests
+                        disableStream: true // Disable streaming
+                    });
+
+                    // Add comprehensive timeout to PDF processing
                     const pdf = await Promise.race([
                         loadingTask.promise,
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('PDF loading timeout')), 60000)
-                        )
+                        new Promise((_, reject) => {
+                            setTimeout(() => {
+                                console.log('⏰ PDF loading timeout (120s)');
+                                reject(new Error('PDF loading timeout after 120 seconds'));
+                            }, 120000); // 2 minute timeout
+                        })
                     ]) as any;
 
                     let text = '';
-                    console.log(`📄 PDF has ${pdf.numPages} pages`);
+                    const totalPages = pdf.numPages;
+                    console.log(`📄 PDF has ${totalPages} pages, starting extraction...`);
 
-                    for (let i = 1; i <= pdf.numPages; i++) {
-                        console.log(`📄 Processing page ${i}/${pdf.numPages}`);
-                        const page = await pdf.getPage(i);
-                        const content = await page.getTextContent();
-                        text += content.items.map((item: any) => item.str).join(' ') + '\n';
-
-                        // Update progress for each page
-                        job.progress = 20 + (i / pdf.numPages) * 20;
+                    // Limit page processing for very large documents
+                    const maxPages = Math.min(totalPages, 100); // Process max 100 pages
+                    if (totalPages > maxPages) {
+                        console.log(`⚠️ Large PDF detected (${totalPages} pages). Processing first ${maxPages} pages only.`);
                     }
+
+                    for (let i = 1; i <= maxPages; i++) {
+                        try {
+                            console.log(`📄 Processing page ${i}/${maxPages}...`);
+
+                            // Add timeout for each page
+                            const pagePromise = pdf.getPage(i);
+                            const page = await Promise.race([
+                                pagePromise,
+                                new Promise((_, reject) => {
+                                    setTimeout(() => {
+                                        reject(new Error(`Page ${i} processing timeout`));
+                                    }, 30000); // 30s per page
+                                })
+                            ]) as any;
+
+                            const content = await page.getTextContent();
+                            const pageText = content.items.map((item: any) => item.str).join(' ');
+                            text += pageText + '\n';
+
+                            // Update progress incrementally
+                            job.progress = 20 + (i / maxPages) * 30;
+
+                            // Log progress every 10 pages
+                            if (i % 10 === 0 || i === maxPages) {
+                                console.log(`✅ Processed ${i}/${maxPages} pages, extracted ${text.length} characters so far`);
+                            }
+
+                            // Memory management: if text is getting very large, break early
+                            if (text.length > 1000000) { // 1MB of text
+                                console.log(`⚠️ Large text content detected (${text.length} chars). Stopping early to prevent memory issues.`);
+                                break;
+                            }
+
+                        } catch (pageError) {
+                            console.error(`❌ Error processing page ${i}:`, pageError instanceof Error ? pageError.message : String(pageError));
+                            // Continue with next page instead of failing completely
+                            continue;
+                        }
+                    }
+
                     extractedText = text;
-                    console.log(`✅ PDF processing complete, extracted ${text.length} characters`);
+                    console.log(`✅ PDF processing complete! Extracted ${text.length} characters from ${maxPages} pages`);
+
+                    if (text.length < 100) {
+                        console.log(`⚠️ Very little text extracted. PDF might be image-based or corrupted.`);
+                        throw new Error('PDF contains insufficient text content. It may be image-based or corrupted.');
+                    }
                 } catch (pdfError) {
                     console.error(`❌ PDF processing failed:`, pdfError);
                     throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
@@ -1416,22 +1503,41 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         console.log(`📝 Mock job data:`, JSON.stringify(mockJob, null, 2));
 
-        const extractionTimeout = 300000;
+        // Increase extraction timeout for large files (10 minutes)
+        const extractionTimeout = 600000; // 10 minutes
         const extractionPromise = processor.extractQuestionsProcessor(mockJob);
 
         let extractResult;
         try {
-            console.log(`⏰ Starting extraction with ${extractionTimeout / 1000}s timeout...`);
+            console.log(`⏰ Starting extraction with enhanced timeout (${extractionTimeout / 1000}s)...`);
             extractResult = await Promise.race([
                 extractionPromise,
                 new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Extraction timeout after 5 minutes')), extractionTimeout)
+                    setTimeout(() => {
+                        console.log(`❌ Extraction timeout reached after ${extractionTimeout / 1000} seconds`);
+                        reject(new Error(`Extraction timeout after ${extractionTimeout / 60000} minutes. File may be too large or complex.`));
+                    }, extractionTimeout)
                 )
             ]);
-            console.log(`✅ Extraction completed:`, extractResult);
+            console.log(`✅ Extraction completed successfully:`, extractResult);
         } catch (extractError) {
             console.error(`❌ Extraction failed:`, extractError);
-            throw new Error(`Extraction failed: ${extractError instanceof Error ? extractError.message : String(extractError)}`);
+
+            // Provide more helpful error messages
+            let errorMessage = 'Extraction failed';
+            if (extractError instanceof Error) {
+                if (extractError.message.includes('timeout')) {
+                    errorMessage = 'File processing timeout. The file may be too large or complex. Try with a smaller file.';
+                } else if (extractError.message.includes('download')) {
+                    errorMessage = 'Failed to download file. Please check the file URL and try again.';
+                } else if (extractError.message.includes('PDF')) {
+                    errorMessage = 'PDF processing failed. The file may be corrupted or password-protected.';
+                } else {
+                    errorMessage = `Processing failed: ${extractError.message}`;
+                }
+            }
+
+            throw new Error(errorMessage);
         }
 
         await db.aIProcessingJob.update({

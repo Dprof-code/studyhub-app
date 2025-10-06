@@ -7,7 +7,11 @@
     "jsx": "react",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types"
+    ]
   },
   "include": ["server.ts", "src/**/*"],
   "exclude": ["node_modules", ".next", "dist"]

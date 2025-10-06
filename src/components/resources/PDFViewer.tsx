@@ -11,7 +11,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 if (typeof window !== 'undefined') {
     // Primary: Use CDN with correct version
     // Fallback: Use local copy if CDN fails
-    const workerUrl = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
+    const workerUrl = `https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs`;
 
     try {
         pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;

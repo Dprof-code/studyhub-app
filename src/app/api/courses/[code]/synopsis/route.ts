@@ -5,7 +5,7 @@ import { db } from "@/lib/dbconfig";
 import { z } from "zod";
 
 const synopsisSchema = z.object({
-    synopsis: z.string().min(10).max(500),
+    synopsis: z.string().min(10),
 });
 
 export async function PATCH(

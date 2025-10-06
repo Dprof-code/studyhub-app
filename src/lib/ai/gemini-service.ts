@@ -349,6 +349,108 @@ Write in a friendly, educational tone.
         }
     }
 
+    // method for extracting learning content from educational materials
+    async extractLearningContent(
+        text: string,
+        courseContext: string,
+        resourceTags: string[]
+    ): Promise<{
+        concepts: Array<{
+            name: string;
+            description: string;
+            category: string;
+            difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+            confidence: number;
+        }>;
+        summaries: string[];
+        objectives: string[];
+        definitions: Array<{
+            term: string;
+            definition: string;
+        }>;
+    }> {
+        try {
+            const resourceType = this.getResourceType(resourceTags);
+
+            const prompt = `
+Analyze this ${resourceType} content and extract educational elements:
+
+COURSE CONTEXT: ${courseContext}
+
+CONTENT:
+${text}
+
+Extract the following:
+
+1. KEY CONCEPTS: Identify 5-15 main concepts covered
+   - Provide name, description, category, difficulty level
+   - Rate confidence (0.0-1.0) for each concept
+
+2. CHAPTER/SECTION SUMMARIES: Create 2-5 concise summaries
+   - Each summary should be 100-200 words
+   - Focus on main ideas and learning outcomes
+
+3. LEARNING OBJECTIVES: Identify what students should learn
+   - List 3-10 specific learning objectives
+   - Use action verbs (understand, analyze, apply, etc.)
+
+4. KEY DEFINITIONS: Extract important terms and definitions
+   - Include technical terms, jargon, and key vocabulary
+
+Return as structured JSON:
+{
+  "concepts": [
+    {
+      "name": "concept name",
+      "description": "detailed explanation",
+      "category": "category (e.g., theory, practical, mathematical)",
+      "difficulty": "EASY|MEDIUM|HARD",
+      "confidence": 0.9
+    }
+  ],
+  "summaries": ["summary 1", "summary 2"],
+  "objectives": ["objective 1", "objective 2"],
+  "definitions": [
+    {
+      "term": "technical term",
+      "definition": "clear definition"
+    }
+  ]
+}`;
+
+            const result = await this.model.generateContent(prompt);
+            const responseText = result.response.text();
+
+            // Parse and validate JSON response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                throw new Error('No valid JSON found in response');
+            }
+
+            const analysis = JSON.parse(jsonMatch[0]);
+
+            // Validate and return structured data
+            return {
+                concepts: analysis.concepts || [],
+                summaries: analysis.summaries || [],
+                objectives: analysis.objectives || [],
+                definitions: analysis.definitions || []
+            };
+
+        } catch (error) {
+            console.error('Failed to extract learning content:', error);
+            throw new Error(`Learning content extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private getResourceType(tags: string[]): string {
+        if (tags.includes('lecture-note')) return 'lecture note';
+        if (tags.includes('concept')) return 'concept explanation';
+        if (tags.includes('reference')) return 'reference material';
+        if (tags.includes('topic')) return 'topic overview';
+        return 'educational content';
+    }
+
     /**
      * Calculate relevance score between concepts and resource
      */

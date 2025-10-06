@@ -256,6 +256,21 @@ model Resource {
 
   // AI & Analytics Relations  
   userInteractions UserInteraction[]
+  learningContent  LearningContent[]
+}
+
+model LearningContent {
+  id          Int      @id @default(autoincrement())
+  resourceId  Int
+  contentType String // 'summary', 'objective', 'definition'
+  content     String   @db.Text
+  metadata    Json? // Additional data like difficulty, category
+  aiGenerated Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@map("learning_content")
 }
 
 model Tag {

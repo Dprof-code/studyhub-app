@@ -244,12 +244,23 @@ export default function UploadResources() {
             setUploadProgress(95);
 
             // Trigger AI analysis if enabled
-            if (enableAIAnalysis && (selectedTags.includes('past-question') || selectedTags.includes('tutorial') || selectedTags.includes('assignment'))) {
+            if (enableAIAnalysis && (
+                selectedTags.includes('past-question') ||
+                selectedTags.includes('tutorial') ||
+                selectedTags.includes('assignment') ||
+                selectedTags.includes('lecture-note') ||
+                selectedTags.includes('concept') ||
+                selectedTags.includes('topic') ||
+                selectedTags.includes('reference')
+            )) {
                 try {
                     const aiResponse = await fetch('/api/ai/analyze-questions', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ resourceId: resource.id }),
+                        body: JSON.stringify({
+                            resourceId: resource.id,
+                            analysisType: selectedTags.includes('past-question') ? 'questions' : 'content'
+                        }),
                     });
 
                     if (aiResponse.ok) {
@@ -494,7 +505,13 @@ export default function UploadResources() {
 
                         {/* AI Analysis Option */}
                         {(file?.type === 'application/pdf' || file?.type?.startsWith('image/')) &&
-                            (selectedTags.includes('past-question') || selectedTags.includes('tutorial') || selectedTags.includes('assignment')) && (
+                            (selectedTags.includes('past-question') ||
+                                selectedTags.includes('tutorial') ||
+                                selectedTags.includes('assignment') ||
+                                selectedTags.includes('lecture-note') ||
+                                selectedTags.includes('concept') ||
+                                selectedTags.includes('topic') ||
+                                selectedTags.includes('reference')) && (
                                 <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
                                     <div className="flex items-center space-x-3">
                                         <input
@@ -506,11 +523,17 @@ export default function UploadResources() {
                                         />
                                         <label htmlFor="ai-analysis" className="flex items-center space-x-2 text-sm font-medium text-blue-900">
                                             <Brain className="h-4 w-4" />
-                                            <span>Enable AI Question Analysis</span>
+                                            <span>
+                                                {selectedTags.includes('past-question') || selectedTags.includes('assignment')
+                                                    ? 'Enable AI Question Analysis'
+                                                    : 'Enable AI Content Analysis'}
+                                            </span>
                                         </label>
                                     </div>
                                     <p className="text-sm text-blue-700">
-                                        Automatically extract questions, identify key concepts, and find related study materials using AI.
+                                        {selectedTags.includes('past-question') || selectedTags.includes('assignment')
+                                            ? 'Automatically extract questions, identify key concepts, and find related study materials using AI.'
+                                            : 'Extract key concepts, learning objectives, and build knowledge base for intelligent study assistance.'}
                                     </p>
                                 </div>
                             )}

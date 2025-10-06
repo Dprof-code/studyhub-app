@@ -1,5 +1,7 @@
 import { jobQueue, JOB_TYPES } from './jobQueue';
 import { db } from '../dbconfig';
+import { geminiAI } from '../ai/gemini-service';
+import { documentAI } from '../ai/documentai-service';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as fs from 'fs';
 import tesseract from 'node-tesseract-ocr';
@@ -34,6 +36,8 @@ export interface AnalyzeDocumentJobData {
     filePath: string;
     fileType: string;
     enableAIAnalysis: boolean;
+    analysisType?: string; // 'questions' or 'content'
+    tags?: string[]; // Resource tags for context
 }
 
 // AI Processing Job Processors
@@ -760,6 +764,191 @@ class AIJobProcessors {
         }
     }
 
+    // method for content analysis (not just questions)
+    private async analyzeContentProcessor(job: any): Promise<any> {
+        const { resourceId, filePath, fileType, analysisType = 'questions' } = job.data;
+
+        console.log(`📚 Starting ${analysisType} analysis for resource ${resourceId}`);
+
+        try {
+            // Step 1: Extract full text content
+            const extractResult = await this.extractQuestionsProcessor({
+                data: { resourceId, filePath, fileType }
+            });
+
+            if (analysisType === 'content') {
+                // For learning materials: extract concepts, summaries, learning objectives
+                const contentResult = await this.extractLearningContentProcessor({
+                    data: {
+                        resourceId,
+                        extractedText: extractResult.extractedText,
+                        resourceTags: job.data.tags
+                    }
+                });
+
+                // Update RAG with comprehensive content
+                const ragResult = await this.updateRAGIndexProcessor({
+                    data: {
+                        resourceId,
+                        content: extractResult.extractedText,
+                        concepts: contentResult?.concepts || [],
+                        summaries: contentResult?.summaries || [],
+                        learningObjectives: contentResult?.objectives || []
+                    }
+                });
+
+                return {
+                    analysisType: 'content',
+                    contentExtracted: extractResult.extractedText.length,
+                    conceptsIdentified: contentResult?.concepts?.length || 0,
+                    summariesGenerated: contentResult?.summaries?.length || 0,
+                    ragIndexed: ragResult?.indexed || false
+                };
+            } else {
+                // For questions: use existing question extraction logic
+                return await this.extractQuestionsProcessor(job);
+            }
+        } catch (error) {
+            console.error(`❌ Content analysis failed:`, error);
+            throw error;
+        }
+    }
+
+    // method for extracting learning content from educational materials
+    private async extractLearningContentProcessor(job: any): Promise<any> {
+        const { resourceId, extractedText, resourceTags } = job.data;
+
+        console.log(`📖 Extracting learning content for resource ${resourceId}`);
+
+        try {
+            // Get course context for better analysis
+            const resource = await db.resource.findUnique({
+                where: { id: resourceId },
+                include: { course: true }
+            });
+            const courseContext = resource?.course ?
+                await this.getCourseContext(resource.course.id) :
+                'No course context available';
+
+            // Use Gemini to extract educational content
+            const contentAnalysis = await geminiAI.extractLearningContent(
+                extractedText,
+                courseContext,
+                resourceTags
+            );
+
+            // Store concepts in database
+            const concepts = [];
+            for (const conceptData of contentAnalysis.concepts || []) {
+                const concept = await this.storeOrUpdateConcept(conceptData, resourceId);
+                concepts.push(concept);
+            }
+
+            // Store summaries and learning objectives
+            if (contentAnalysis.summaries?.length > 0) {
+                await this.storeLearningContent(resourceId, 'summary', contentAnalysis.summaries);
+            }
+
+            if (contentAnalysis.objectives?.length > 0) {
+                await this.storeLearningContent(resourceId, 'objective', contentAnalysis.objectives);
+            }
+
+            return {
+                concepts,
+                summaries: contentAnalysis.summaries || [],
+                objectives: contentAnalysis.objectives || []
+            };
+
+        } catch (error) {
+            console.error(`❌ Learning content extraction failed:`, error);
+            return { concepts: [], summaries: [], objectives: [] };
+        }
+    }
+
+    // method to store learning content
+    private async storeLearningContent(
+        resourceId: number,
+        contentType: 'summary' | 'objective' | 'definition',
+        content: string[]
+    ): Promise<void> {
+        for (const item of content) {
+            await db.learningContent.create({
+                data: {
+                    resourceId,
+                    contentType,
+                    content: item,
+                    aiGenerated: true
+                }
+            });
+        }
+    }
+
+    /**
+     * Store or update a concept and create resource relationship
+     */
+    private async storeOrUpdateConcept(conceptData: any, resourceId: number): Promise<any> {
+        try {
+            // Find existing concept (case-insensitive)
+            let concept = await db.concept.findFirst({
+                where: {
+                    name: {
+                        equals: conceptData.name,
+                        mode: 'insensitive'
+                    }
+                }
+            });
+
+            if (!concept) {
+                // Create new concept
+                concept = await db.concept.create({
+                    data: {
+                        name: conceptData.name,
+                        description: conceptData.description || '',
+                        category: conceptData.category || 'General',
+                        aiSummary: ''
+                    }
+                });
+                console.log(`✅ Created new concept: ${conceptData.name}`);
+            } else {
+                // Update existing concept if needed
+                if (conceptData.description && (!concept.description || concept.description.length < conceptData.description.length)) {
+                    await db.concept.update({
+                        where: { id: concept.id },
+                        data: {
+                            description: conceptData.description,
+                            category: conceptData.category || concept.category
+                        }
+                    });
+                    console.log(`📝 Updated concept: ${conceptData.name}`);
+                }
+            }
+
+            // Create or update concept-resource relationship
+            await db.conceptResource.upsert({
+                where: {
+                    conceptId_resourceId: {
+                        conceptId: concept.id,
+                        resourceId: resourceId
+                    }
+                },
+                update: {
+                    relevanceScore: Math.max(conceptData.confidence || 0.8, 0.7)
+                },
+                create: {
+                    conceptId: concept.id,
+                    resourceId: resourceId,
+                    relevanceScore: conceptData.confidence || 0.8,
+                    extractedContent: conceptData.description || conceptData.name
+                }
+            });
+
+            return concept;
+        } catch (error) {
+            console.error(`❌ Error storing/updating concept ${conceptData.name}:`, error);
+            throw error;
+        }
+    }
+
     /**
      * Get MIME type from file extension
      */
@@ -779,80 +968,235 @@ class AIJobProcessors {
     }
 
     private async identifyConceptsProcessor(job: any): Promise<any> {
+        const { resourceId, questions } = job.data;
+
         try {
-            console.log(`🧠 Starting concept identification for job ${job.id}`);
-            job.progress = 20;
+            console.log(`🧠 Starting AI-powered concept identification for resource ${resourceId}`);
+            job.progress = 10;
 
-            // Mock concept identification
-            const mockConcepts = [
-                { name: 'Linear Algebra', description: 'Mathematical concepts involving vectors and matrices', category: 'Mathematics' },
-                { name: 'Data Structures', description: 'Ways of organizing and storing data', category: 'Computer Science' }
-            ];
+            // Get course context for better concept identification
+            const resource = await db.resource.findUnique({
+                where: { id: resourceId },
+                include: {
+                    course: {
+                        include: {
+                            department: {
+                                include: { faculty: true }
+                            }
+                        }
+                    }
+                }
+            });
 
-            job.progress = 60;
+            const courseContext = resource?.course ?
+                `Course: ${resource.course.code} - ${resource.course.title}\nDepartment: ${resource.course.department.name}\nFaculty: ${resource.course.department.faculty.name}` :
+                'No course context available';
 
-            // Store concepts in database
-            const savedConcepts = await Promise.all(
-                mockConcepts.map(async (conceptData) => {
+            job.progress = 30;
+
+            // Use Gemini AI to identify concepts from questions
+            const questionsText = Array.isArray(questions) ?
+                questions.map(q => typeof q === 'string' ? q : q.questionText || '').join('\n\n') :
+                (typeof questions === 'string' ? questions : '');
+
+            console.log(`📝 Analyzing ${questionsText.length} characters of question text`);
+
+            if (!questionsText || questionsText.length < 10) {
+                console.log('⚠️ No sufficient question text for concept identification');
+                return {
+                    conceptsIdentified: 0,
+                    concepts: [],
+                    message: 'Insufficient text for concept identification'
+                };
+            }
+
+            job.progress = 50;
+
+            // Use Gemini to identify concepts
+            const conceptAnalyses = await geminiAI.identifyQuestionConcepts(questionsText, courseContext);
+
+            job.progress = 70;
+
+            // Store concepts in database with AI-generated descriptions
+            const savedConcepts = [];
+            for (const conceptData of conceptAnalyses) {
+                try {
                     let concept = await db.concept.findFirst({
-                        where: { name: conceptData.name }
+                        where: {
+                            name: {
+                                equals: conceptData.name,
+                                mode: 'insensitive'
+                            }
+                        }
                     });
 
                     if (!concept) {
+                        // Generate AI summary for the concept
+                        const aiSummary = await geminiAI.generateConceptSummary(
+                            conceptData.name,
+                            courseContext + '\n\nQuestions context: ' + questionsText.substring(0, 500)
+                        );
+
                         concept = await db.concept.create({
                             data: {
                                 name: conceptData.name,
-                                description: conceptData.description || '',
-                                category: conceptData.category,
-                                aiSummary: ''
+                                description: conceptData.description || `Key concept in ${resource?.course?.title || 'this course'}`,
+                                category: conceptData.category || 'Academic',
+                                aiSummary: aiSummary || ''
                             }
                         });
+
+                        console.log(`✅ Created new concept: ${conceptData.name}`);
+                    } else {
+                        // Update existing concept with better description if needed
+                        if (!concept.aiSummary || concept.aiSummary.length < 50) {
+                            const aiSummary = await geminiAI.generateConceptSummary(
+                                conceptData.name,
+                                courseContext
+                            );
+
+                            await db.concept.update({
+                                where: { id: concept.id },
+                                data: { aiSummary: aiSummary || concept.aiSummary }
+                            });
+                        }
+
+                        console.log(`📝 Updated existing concept: ${conceptData.name}`);
                     }
 
-                    return concept;
-                })
-            );
+                    // Create concept-resource relationship
+                    await db.conceptResource.upsert({
+                        where: {
+                            conceptId_resourceId: {
+                                conceptId: concept.id,
+                                resourceId: resourceId
+                            }
+                        },
+                        update: {
+                            relevanceScore: conceptData.confidence || 0.8
+                        },
+                        create: {
+                            conceptId: concept.id,
+                            resourceId: resourceId,
+                            relevanceScore: conceptData.confidence || 0.8,
+                            extractedContent: questionsText.substring(0, 500)
+                        }
+                    });
+
+                    savedConcepts.push(concept);
+                } catch (conceptError) {
+                    console.error(`❌ Failed to process concept ${conceptData.name}:`, conceptError);
+                }
+            }
 
             job.progress = 100;
+            console.log(`✅ AI concept identification completed: ${savedConcepts.length} concepts identified`);
 
             return {
                 conceptsIdentified: savedConcepts.length,
-                concepts: savedConcepts
+                concepts: savedConcepts,
+                aiAnalyzed: true,
+                courseContext: courseContext
             };
 
         } catch (error) {
+            console.error(`❌ AI concept identification failed:`, error);
             throw error;
         }
     }
 
     private async updateRAGIndexProcessor(job: any): Promise<any> {
-        const { resourceId, content, concepts } = job.data;
+        const { resourceId, content, concepts, summaries = [], objectives = [] } = job.data;
 
         try {
-            job.progress = 30;
+            console.log(`📚 Updating RAG index for resource ${resourceId} with ${content.length} characters`);
+            job.progress = 20;
 
-            // Mock RAG indexing
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Store full content without truncation - use TEXT field for large content
+            const ragContent = content.length > 0 ? content : 'No content extracted';
 
-            job.progress = 70;
+            // Create comprehensive RAG content including summaries and objectives
+            let enhancedRagContent = ragContent;
 
-            // Update resource with RAG content
+            if (summaries?.length > 0) {
+                enhancedRagContent += '\n\n=== SUMMARIES ===\n' + summaries.join('\n\n');
+            }
+
+            if (objectives?.length > 0) {
+                enhancedRagContent += '\n\n=== LEARNING OBJECTIVES ===\n' + objectives.join('\n');
+            }
+
+            if (concepts?.length > 0) {
+                enhancedRagContent += '\n\n=== KEY CONCEPTS ===\n' + concepts.join(', ');
+            }
+
+            job.progress = 50;
+
+            // Update resource with full RAG content (no truncation)
             await db.resource.update({
                 where: { id: resourceId },
                 data: {
-                    ragContent: content.substring(0, 2000)
+                    ragContent: enhancedRagContent // Store full content
                 }
             });
 
+            job.progress = 80;
+
+            // Create concept-resource relationships for better RAG retrieval
+            if (concepts?.length > 0) {
+                for (const conceptName of concepts) {
+                    // Find or create concept
+                    let concept = await db.concept.findFirst({
+                        where: { name: conceptName }
+                    });
+
+                    if (!concept) {
+                        concept = await db.concept.create({
+                            data: {
+                                name: conceptName,
+                                description: `Concept extracted from resource content`,
+                                category: 'Auto-extracted',
+                                aiSummary: ''
+                            }
+                        });
+                    }
+
+                    // Create or update concept-resource relationship
+                    await db.conceptResource.upsert({
+                        where: {
+                            conceptId_resourceId: {
+                                conceptId: concept.id,
+                                resourceId: resourceId
+                            }
+                        },
+                        update: {
+                            relevanceScore: 0.8,
+                            extractedContent: ragContent.substring(0, 1000) // Store relevant snippet
+                        },
+                        create: {
+                            conceptId: concept.id,
+                            resourceId: resourceId,
+                            relevanceScore: 0.8,
+                            extractedContent: ragContent.substring(0, 1000)
+                        }
+                    });
+                }
+            }
+
             job.progress = 100;
+            console.log(`✅ RAG index updated successfully for resource ${resourceId}`);
 
             return {
                 indexed: true,
-                contentLength: content.length,
-                conceptsCount: concepts.length
+                contentLength: enhancedRagContent.length,
+                conceptsCount: concepts?.length || 0,
+                summariesCount: summaries?.length || 0,
+                objectivesCount: objectives?.length || 0,
+                ragContentLength: enhancedRagContent.length
             };
 
         } catch (error) {
+            console.error(`❌ RAG indexing failed for resource ${resourceId}:`, error);
             throw error;
         }
     }

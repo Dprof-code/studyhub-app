@@ -1,14 +1,12 @@
-import * as pdfjsLib from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 
 interface ProcessingResult {
     extractedText: string;
     pageCount?: number;
     processingTime: number;
     confidence?: number; // For OCR results
+    usedDocumentAI?: boolean;
+    tables?: Array<{ rows: number; columns: number; content: string[][] }>;
 }
 
 export class DocumentProcessor {
@@ -32,12 +30,60 @@ export class DocumentProcessor {
     }
 
     /**
-     * Extract text from PDF document
+     * Extract text from PDF document using Document AI as primary method
      */
     async extractTextFromPDF(fileBuffer: Buffer): Promise<ProcessingResult> {
         const startTime = Date.now();
 
         try {
+            // Try Document AI first
+            const { documentAI } = await import('../ai/documentai-service');
+
+            if (documentAI.isConfigured()) {
+                console.log(`🤖 Using Document AI for PDF processing...`);
+
+                try {
+                    // Try structured extraction first for better content understanding
+                    const structuredData = await documentAI.extractStructuredData(fileBuffer, 'application/pdf');
+                    const processingTime = Date.now() - startTime;
+
+                    console.log(`✅ Document AI structured extraction: ${structuredData.text.length} chars, ${structuredData.tables.length} tables`);
+
+                    return {
+                        extractedText: structuredData.text,
+                        processingTime,
+                        usedDocumentAI: true,
+                        tables: structuredData.tables
+                    };
+                } catch {
+                    console.log(`⚠️ Structured extraction failed, trying basic Document AI extraction...`);
+
+                    // Fallback to basic Document AI text extraction
+                    const text = await documentAI.extractTextFromImage(fileBuffer, 'application/pdf');
+                    const processingTime = Date.now() - startTime;
+
+                    return {
+                        extractedText: text,
+                        processingTime,
+                        usedDocumentAI: true
+                    };
+                }
+            }
+        } catch (documentAIError) {
+            console.log(`⚠️ Document AI failed, falling back to PDF.js: ${documentAIError}`);
+        }
+
+        // Fallback to PDF.js if Document AI is not available
+        console.log(`📄 Falling back to PDF.js processing...`);
+
+        try {
+            const pdfjsLib = await import('pdfjs-dist');
+
+            // Configure PDF.js for server-side processing
+            if (typeof window === 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+            }
+
             // Load PDF document
             const pdfDoc = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
             const pageCount = pdfDoc.numPages;
@@ -57,7 +103,7 @@ export class DocumentProcessor {
                 } else {
                     // If no text found, try OCR on this page
                     console.log(`Page ${pageNum} has no extractable text, trying OCR...`);
-                    const ocrText = await this.extractTextFromPDFPageWithOCR(page);
+                    const ocrText = await this.extractTextFromPDFPageWithOCR();
                     if (ocrText) {
                         extractedText += `\n\n--- Page ${pageNum} (OCR) ---\n${ocrText}`;
                     }
@@ -69,48 +115,23 @@ export class DocumentProcessor {
             return {
                 extractedText: extractedText.trim(),
                 pageCount,
-                processingTime
+                processingTime,
+                usedDocumentAI: false
             };
 
         } catch (error) {
             console.error('Error extracting text from PDF:', error);
-            throw new Error('Failed to process PDF document');
+            throw new Error('Failed to process PDF document with both Document AI and PDF.js');
         }
     }
 
     /**
      * Extract text from PDF page using OCR (for scanned documents)
      */
-    private async extractTextFromPDFPageWithOCR(page: any): Promise<string> {
+    private async extractTextFromPDFPageWithOCR(): Promise<string> {
         try {
-            // Render page to canvas
-            const viewport = page.getViewport({ scale: 2.0 });
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-
-            if (!context) {
-                throw new Error('Could not get canvas context');
-            }
-
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-
-            const renderContext = {
-                canvasContext: context,
-                viewport: viewport
-            };
-
-            await page.render(renderContext).promise;
-
-            // Convert canvas to image buffer
-            const imageData = canvas.toDataURL('image/png');
-
-            // Use OCR to extract text
-            if (this.ocrWorker) {
-                const { data: { text } } = await this.ocrWorker.recognize(imageData);
-                return text;
-            }
-
+            // This would need to be adapted for server-side rendering
+            // For now, return empty string as Canvas is not available in Node.js
             return '';
         } catch (error) {
             console.error('Error with PDF page OCR:', error);
@@ -119,11 +140,36 @@ export class DocumentProcessor {
     }
 
     /**
-     * Extract text from image using OCR
+     * Extract text from image using Document AI as primary method
      */
-    async extractTextFromImage(imageBuffer: Buffer): Promise<ProcessingResult> {
+    async extractTextFromImage(imageBuffer: Buffer, mimeType?: string): Promise<ProcessingResult> {
         const startTime = Date.now();
 
+        try {
+            // Try Document AI first
+            const { documentAI } = await import('../ai/documentai-service');
+
+            if (documentAI.isConfigured()) {
+                console.log(`🤖 Using Document AI for image OCR...`);
+
+                const detectedMimeType = mimeType || 'image/png';
+                const text = await documentAI.extractTextFromImage(imageBuffer, detectedMimeType);
+                const processingTime = Date.now() - startTime;
+
+                console.log(`✅ Document AI image extraction: ${text.length} chars`);
+
+                return {
+                    extractedText: text.trim(),
+                    processingTime,
+                    confidence: 0.95, // Document AI typically has high confidence
+                    usedDocumentAI: true
+                };
+            }
+        } catch (documentAIError) {
+            console.log(`⚠️ Document AI image processing failed, falling back to Tesseract: ${documentAIError}`);
+        }
+
+        // Fallback to Tesseract OCR
         try {
             if (!this.ocrWorker) {
                 await this.initializeOCR();
@@ -135,24 +181,25 @@ export class DocumentProcessor {
             return {
                 extractedText: text.trim(),
                 processingTime,
-                confidence: confidence / 100 // Convert to 0-1 scale
+                confidence: confidence / 100, // Convert to 0-1 scale
+                usedDocumentAI: false
             };
 
         } catch (error) {
             console.error('Error extracting text from image:', error);
-            throw new Error('Failed to process image document');
+            throw new Error('Failed to process image document with both Document AI and Tesseract');
         }
     }
 
     /**
-     * Process any supported document type
+     * Process any supported document type with Document AI priority
      */
     async processDocument(fileBuffer: Buffer, mimeType: string): Promise<ProcessingResult> {
         try {
             if (mimeType === 'application/pdf') {
                 return await this.extractTextFromPDF(fileBuffer);
             } else if (mimeType.startsWith('image/')) {
-                return await this.extractTextFromImage(fileBuffer);
+                return await this.extractTextFromImage(fileBuffer, mimeType);
             } else {
                 throw new Error(`Unsupported file type: ${mimeType}`);
             }

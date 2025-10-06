@@ -15,15 +15,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
     }
 
-    // Queue appropriate analysis based on resource type
+    // Queue enhanced analysis with Document AI support
     const job = await queueAIAnalysis({
         resourceId,
         filePath: resource.fileUrl,
         fileType: resource.fileType,
-        analysisType, // 'questions' or 'content'
+        analysisType, // 'questions', 'content', or 'all'
         tags: resource.tags.map(t => t.name),
         enableAIAnalysis: true
     });
 
-    return NextResponse.json({ jobId: job.id });
+    return NextResponse.json({
+        jobId: job.id,
+        message: 'Enhanced AI analysis with Document AI started',
+        analysisType,
+        documentAIEnabled: true
+    });
 }

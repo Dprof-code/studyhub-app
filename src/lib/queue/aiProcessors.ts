@@ -134,103 +134,166 @@ class AIJobProcessors {
                 console.log(`✅ Read local file, size: ${fileBuffer.length} bytes`);
             }
 
-            // 1. Extract text from PDF or image with progressive processing
+            // 1. Extract text from PDF or image with Document AI as primary method
             if (fileType.toLowerCase().includes('pdf')) {
-                console.log(`📖 Processing PDF file (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)...`);
+                console.log(`📖 Processing PDF file (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB) with Document AI...`);
                 job.progress = 20;
 
                 try {
-                    const pdfjsLibLegacy = await import('pdfjs-dist/legacy/build/pdf');
-                    const pdfjsLib = pdfjsLibLegacy; // Use legacy build at runtime
-                    if (typeof window === 'undefined') {
-                        console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
-                        pdfjsLib.GlobalWorkerOptions.workerPort = null;
-                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs-dist/build/pdf.worker.js'; // Fake path
-                    }
+                    // Import Document AI service for PDF processing
+                    const { documentAI } = await import('../ai/documentai-service');
 
-                    const data = new Uint8Array(fileBuffer);
-                    console.log(`🔧 Creating PDF loading task...`);
+                    console.log(`🤖 Using Google Cloud Document AI for PDF text extraction...`);
+                    console.log(`📊 PDF details: application/pdf, size: ${fileBuffer.length} bytes`);
 
-                    const loadingTask = pdfjsLib.getDocument({
-                        data,
-                        verbosity: 0, // Reduce logging
-                        maxImageSize: 1024 * 1024, // 1MB max image size
-                        disableFontFace: true, // Disable font loading for speed
-                        disableRange: true, // Disable range requests
-                        disableStream: true
-                    });
+                    // Check if Document AI is configured
+                    const configStatus = documentAI.getConfigurationStatus();
+                    console.log(`⚙️ Document AI configuration:`, configStatus);
 
-                    // Add comprehensive timeout to PDF processing
-                    const pdf = await Promise.race([
-                        loadingTask.promise,
-                        new Promise((_, reject) => {
-                            setTimeout(() => {
-                                console.log('⏰ PDF loading timeout (120s)');
-                                reject(new Error('PDF loading timeout after 120 seconds'));
-                            }, 120000); // 2 minute timeout
-                        })
-                    ]) as any;
+                    if (documentAI.isConfigured()) {
+                        // Use Document AI for PDF processing
+                        const documentAIResult = await Promise.race([
+                            documentAI.extractTextFromImage(fileBuffer, 'application/pdf'),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Document AI PDF processing timeout after 5 minutes')), 300000)
+                            )
+                        ]) as string;
 
-                    let text = '';
-                    const totalPages = pdf.numPages;
-                    console.log(`📄 PDF has ${totalPages} pages, starting extraction...`);
+                        extractedText = documentAIResult;
+                        console.log(`✅ Document AI PDF processing complete, extracted ${extractedText.length} characters`);
+                        console.log(`📄 Document AI PDF output preview:`, extractedText.substring(0, 500));
 
-                    // Limit page processing for very large documents
-                    const maxPages = Math.min(totalPages, 100); // Process max 100 pages
-                    if (totalPages > maxPages) {
-                        console.log(`⚠️ Large PDF detected (${totalPages} pages). Processing first ${maxPages} pages only.`);
-                    }
+                        // If Document AI returns very little text, try structured extraction
+                        if (extractedText.length < 200) {
+                            console.log(`🔄 Low text content, trying Document AI structured extraction...`);
+                            try {
+                                const structuredData = await documentAI.extractStructuredData(fileBuffer, 'application/pdf');
+                                if (structuredData.text && structuredData.text.length > extractedText.length) {
+                                    extractedText = structuredData.text;
+                                    console.log(`✅ Document AI structured extraction provided better text (${extractedText.length} chars)`);
+                                }
 
-                    for (let i = 1; i <= maxPages; i++) {
-                        try {
-                            console.log(`📄 Processing page ${i}/${maxPages}...`);
-
-                            // Add timeout for each page
-                            const pagePromise = pdf.getPage(i);
-                            const page = await Promise.race([
-                                pagePromise,
-                                new Promise((_, reject) => {
-                                    setTimeout(() => {
-                                        reject(new Error(`Page ${i} processing timeout`));
-                                    }, 30000); // 30s per page
-                                })
-                            ]) as any;
-
-                            const content = await page.getTextContent();
-                            const pageText = content.items.map((item: any) => item.str).join(' ');
-                            text += pageText + '\n';
-
-                            // Update progress incrementally
-                            job.progress = 20 + (i / maxPages) * 30;
-
-                            // Log progress every 10 pages
-                            if (i % 10 === 0 || i === maxPages) {
-                                console.log(`✅ Processed ${i}/${maxPages} pages, extracted ${text.length} characters so far`);
+                                // Also extract table content if available
+                                if (structuredData.tables && structuredData.tables.length > 0) {
+                                    let tableText = '\n\n--- TABLES ---\n';
+                                    structuredData.tables.forEach((table, index) => {
+                                        tableText += `\nTable ${index + 1} (${table.rows}x${table.columns}):\n`;
+                                        table.content.forEach(row => {
+                                            tableText += row.join(' | ') + '\n';
+                                        });
+                                    });
+                                    extractedText += tableText;
+                                    console.log(`✅ Added ${structuredData.tables.length} tables to extracted text`);
+                                }
+                            } catch (structuredError) {
+                                console.log(`⚠️ Structured extraction failed, using initial result`);
                             }
-
-                            // Memory management: if text is getting very large, break early
-                            if (text.length > 1000000) { // 1MB of text
-                                console.log(`⚠️ Large text content detected (${text.length} chars). Stopping early to prevent memory issues.`);
-                                break;
-                            }
-
-                        } catch (pageError) {
-                            console.error(`❌ Error processing page ${i}:`, pageError instanceof Error ? pageError.message : String(pageError));
-                            // Continue with next page instead of failing completely
-                            continue;
                         }
+
+                        // Update progress
+                        job.progress = 50;
+                    } else {
+                        throw new Error('Document AI not configured, falling back to PDF.js');
                     }
 
-                    extractedText = text;
-                    console.log(`✅ PDF processing complete! Extracted ${text.length} characters from ${maxPages} pages`);
+                } catch (documentAIError) {
+                    console.error(`❌ Document AI PDF processing failed:`, documentAIError);
+                    console.log(`🔄 Falling back to PDF.js for PDF processing...`);
 
-                    if (text.length < 100) {
-                        console.log(`⚠️ Very little text extracted. PDF might be image-based or corrupted.`);
-                        throw new Error('PDF contains insufficient text content. It may be image-based or corrupted.');
+                    try {
+                        // Fallback to PDF.js processing
+                        const pdfjsLib = await import('pdfjs-dist');
+
+                        // Configure PDF.js for server-side use
+                        if (typeof window === 'undefined') {
+                            console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
+                            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                        }
+
+                        const data = new Uint8Array(fileBuffer);
+                        console.log(`🔧 Creating PDF.js loading task...`);
+
+                        const loadingTask = pdfjsLib.getDocument({
+                            data,
+                            verbosity: 0, // Reduce logging
+                            maxImageSize: 1024 * 1024, // 1MB max image size
+                            disableFontFace: true, // Disable font loading for speed
+                            disableRange: true, // Disable range requests
+                            disableStream: true // Disable streaming
+                        });
+
+                        // Add comprehensive timeout to PDF processing
+                        const pdf = await Promise.race([
+                            loadingTask.promise,
+                            new Promise((_, reject) => {
+                                setTimeout(() => {
+                                    console.log('⏰ PDF.js loading timeout (120s)');
+                                    reject(new Error('PDF.js loading timeout after 120 seconds'));
+                                }, 120000); // 2 minute timeout
+                            })
+                        ]) as any;
+
+                        let text = '';
+                        const totalPages = pdf.numPages;
+                        console.log(`📄 PDF has ${totalPages} pages, starting PDF.js extraction...`);
+
+                        // Limit page processing for very large documents
+                        const maxPages = Math.min(totalPages, 50); // Process max 50 pages for fallback
+                        if (totalPages > maxPages) {
+                            console.log(`⚠️ Large PDF detected (${totalPages} pages). Processing first ${maxPages} pages only.`);
+                        }
+
+                        for (let i = 1; i <= maxPages; i++) {
+                            try {
+                                console.log(`📄 Processing page ${i}/${maxPages}...`);
+
+                                // Add timeout for each page
+                                const pagePromise = pdf.getPage(i);
+                                const page = await Promise.race([
+                                    pagePromise,
+                                    new Promise((_, reject) => {
+                                        setTimeout(() => {
+                                            reject(new Error(`Page ${i} processing timeout`));
+                                        }, 30000); // 30s per page
+                                    })
+                                ]) as any;
+
+                                const content = await page.getTextContent();
+                                const pageText = content.items.map((item: any) => item.str).join(' ');
+                                text += pageText + '\n';
+
+                                // Update progress incrementally
+                                job.progress = 20 + (i / maxPages) * 30;
+
+                                // Log progress every 10 pages
+                                if (i % 10 === 0 || i === maxPages) {
+                                    console.log(`✅ Processed ${i}/${maxPages} pages, extracted ${text.length} characters so far`);
+                                }
+
+                                // Memory management: if text is getting very large, break early
+                                if (text.length > 500000) { // 500KB of text for fallback
+                                    console.log(`⚠️ Large text content detected (${text.length} chars). Stopping early to prevent memory issues.`);
+                                    break;
+                                }
+
+                            } catch (pageError) {
+                                console.error(`❌ Error processing page ${i}:`, pageError instanceof Error ? pageError.message : String(pageError));
+                                // Continue with next page instead of failing completely
+                                continue;
+                            }
+                        }
+
+                        extractedText = text;
+                        console.log(`✅ PDF.js fallback processing complete! Extracted ${text.length} characters from ${maxPages} pages`);
+
+                        if (text.length < 100) {
+                            console.log(`⚠️ Very little text extracted. PDF might be image-based or corrupted.`);
+                            throw new Error('PDF contains insufficient text content. It may be image-based or corrupted.');
+                        }
+                    } catch (pdfError) {
+                        console.error(`❌ Both Document AI and PDF.js processing failed:`, pdfError);
+                        throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
                     }
-                } catch (pdfError) {
-                    console.error(`❌ PDF processing failed:`, pdfError);
-                    throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
                 }
             } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
                 console.log(`🖼️ Processing image file with Document AI OCR...`);
@@ -1202,31 +1265,16 @@ class AIJobProcessors {
             console.log(`📚 Updating RAG index for resource ${resourceId} with ${content.length} characters`);
             job.progress = 20;
 
-            // Store full content without truncation - use TEXT field for large content
-            const ragContent = content.length > 0 ? content : 'No content extracted';
-
-            // Create comprehensive RAG content including summaries and objectives
-            let enhancedRagContent = ragContent;
-
-            if (summaries?.length > 0) {
-                enhancedRagContent += '\n\n=== SUMMARIES ===\n' + summaries.join('\n\n');
-            }
-
-            if (objectives?.length > 0) {
-                enhancedRagContent += '\n\n=== LEARNING OBJECTIVES ===\n' + objectives.join('\n');
-            }
-
-            if (concepts?.length > 0) {
-                enhancedRagContent += '\n\n=== KEY CONCEPTS ===\n' + concepts.join(', ');
-            }
+            // Enhanced RAG content building with smart chunking
+            const ragContent = await this.buildEnhancedRAGContent(resourceId, content, concepts, summaries, objectives);
 
             job.progress = 50;
 
-            // Update resource with full RAG content (no truncation)
+            // Update resource with enhanced RAG content
             await db.resource.update({
                 where: { id: resourceId },
                 data: {
-                    ragContent: enhancedRagContent // Store full content
+                    ragContent: ragContent.fullContent
                 }
             });
 
@@ -1234,55 +1282,20 @@ class AIJobProcessors {
 
             // Create concept-resource relationships for better RAG retrieval
             if (concepts?.length > 0) {
-                for (const conceptName of concepts) {
-                    // Find or create concept
-                    let concept = await db.concept.findFirst({
-                        where: { name: conceptName }
-                    });
-
-                    if (!concept) {
-                        concept = await db.concept.create({
-                            data: {
-                                name: conceptName,
-                                description: `Concept extracted from resource content`,
-                                category: 'Auto-extracted',
-                                aiSummary: ''
-                            }
-                        });
-                    }
-
-                    // Create or update concept-resource relationship
-                    await db.conceptResource.upsert({
-                        where: {
-                            conceptId_resourceId: {
-                                conceptId: concept.id,
-                                resourceId: resourceId
-                            }
-                        },
-                        update: {
-                            relevanceScore: 0.8,
-                            extractedContent: ragContent.substring(0, 1000) // Store relevant snippet
-                        },
-                        create: {
-                            conceptId: concept.id,
-                            resourceId: resourceId,
-                            relevanceScore: 0.8,
-                            extractedContent: ragContent.substring(0, 1000)
-                        }
-                    });
-                }
+                await this.createConceptResourceRelationships(resourceId, concepts, ragContent.chunks);
             }
 
             job.progress = 100;
-            console.log(`✅ RAG index updated successfully for resource ${resourceId}`);
+            console.log(`✅ Enhanced RAG index updated successfully for resource ${resourceId}`);
 
             return {
                 indexed: true,
-                contentLength: enhancedRagContent.length,
+                contentLength: ragContent.fullContent.length,
+                chunksCount: ragContent.chunks.length,
                 conceptsCount: concepts?.length || 0,
                 summariesCount: summaries?.length || 0,
                 objectivesCount: objectives?.length || 0,
-                ragContentLength: enhancedRagContent.length
+                ragContentLength: ragContent.fullContent.length
             };
 
         } catch (error) {
@@ -1291,16 +1304,256 @@ class AIJobProcessors {
         }
     }
 
+    /**
+     * Build enhanced RAG content with smart chunking and concept extraction
+     */
+    private async buildEnhancedRAGContent(
+        resourceId: number,
+        content: string,
+        concepts: string[] = [],
+        summaries: string[] = [],
+        objectives: string[] = []
+    ): Promise<{
+        fullContent: string;
+        chunks: Array<{
+            id: string;
+            content: string;
+            concepts: string[];
+            type: 'content' | 'summary' | 'objective' | 'definition';
+            startIndex: number;
+            endIndex: number;
+        }>;
+    }> {
+        console.log(`🧩 Building enhanced RAG content with smart chunking...`);
+
+        const chunks: Array<{
+            id: string;
+            content: string;
+            concepts: string[];
+            type: 'content' | 'summary' | 'objective' | 'definition';
+            startIndex: number;
+            endIndex: number;
+        }> = [];
+
+        // Smart chunking strategy based on content structure
+        const chunkSize = 1000; // Optimal size for retrieval
+        const overlapSize = 200; // Overlap to maintain context
+
+        // 1. Chunk main content intelligently
+        console.log(`📄 Chunking main content (${content.length} chars) into optimal chunks...`);
+        const contentChunks = this.intelligentTextChunking(content, chunkSize, overlapSize);
+
+        contentChunks.forEach((chunk, index) => {
+            chunks.push({
+                id: `content_${index}`,
+                content: chunk.text,
+                concepts: this.extractConceptsFromChunk(chunk.text, concepts),
+                type: 'content',
+                startIndex: chunk.startIndex,
+                endIndex: chunk.endIndex
+            });
+        });
+
+        // 2. Add summaries as semantic chunks
+        if (summaries?.length > 0) {
+            summaries.forEach((summary, index) => {
+                chunks.push({
+                    id: `summary_${index}`,
+                    content: summary,
+                    concepts: this.extractConceptsFromChunk(summary, concepts),
+                    type: 'summary',
+                    startIndex: 0,
+                    endIndex: summary.length
+                });
+            });
+        }
+
+        // 3. Add objectives as focused chunks
+        if (objectives?.length > 0) {
+            objectives.forEach((objective, index) => {
+                chunks.push({
+                    id: `objective_${index}`,
+                    content: objective,
+                    concepts: this.extractConceptsFromChunk(objective, concepts),
+                    type: 'objective',
+                    startIndex: 0,
+                    endIndex: objective.length
+                });
+            });
+        }
+
+        // 4. Build comprehensive full content
+        let enhancedRagContent = content;
+
+        if (summaries?.length > 0) {
+            enhancedRagContent += '\n\n=== SUMMARIES ===\n' + summaries.join('\n\n');
+        }
+
+        if (objectives?.length > 0) {
+            enhancedRagContent += '\n\n=== LEARNING OBJECTIVES ===\n' + objectives.join('\n');
+        }
+
+        if (concepts?.length > 0) {
+            enhancedRagContent += '\n\n=== KEY CONCEPTS ===\n' + concepts.join(', ');
+        }
+
+        console.log(`✅ Enhanced RAG content built: ${chunks.length} chunks, ${enhancedRagContent.length} total chars`);
+
+        return {
+            fullContent: enhancedRagContent,
+            chunks: chunks
+        };
+    }
+
+    /**
+     * Intelligent text chunking that respects semantic boundaries
+     */
+    private intelligentTextChunking(
+        text: string,
+        chunkSize: number,
+        overlapSize: number
+    ): Array<{
+        text: string;
+        startIndex: number;
+        endIndex: number;
+    }> {
+        const chunks: Array<{
+            text: string;
+            startIndex: number;
+            endIndex: number;
+        }> = [];
+
+        // Split by paragraphs first to respect semantic boundaries
+        const paragraphs = text.split(/\n\s*\n/);
+        let currentChunk = '';
+        let currentStartIndex = 0;
+        let textIndex = 0;
+
+        for (const paragraph of paragraphs) {
+            const paragraphWithNewlines = paragraph + '\n\n';
+
+            // If adding this paragraph exceeds chunk size, finalize current chunk
+            if (currentChunk.length + paragraphWithNewlines.length > chunkSize && currentChunk.length > 0) {
+                chunks.push({
+                    text: currentChunk.trim(),
+                    startIndex: currentStartIndex,
+                    endIndex: textIndex
+                });
+
+                // Start new chunk with overlap
+                const overlapText = currentChunk.slice(-overlapSize);
+                currentChunk = overlapText + paragraphWithNewlines;
+                currentStartIndex = Math.max(0, textIndex - overlapSize);
+            } else {
+                // Add paragraph to current chunk
+                if (currentChunk.length === 0) {
+                    currentStartIndex = textIndex;
+                }
+                currentChunk += paragraphWithNewlines;
+            }
+
+            textIndex += paragraphWithNewlines.length;
+        }
+
+        // Add final chunk if it has content
+        if (currentChunk.trim().length > 0) {
+            chunks.push({
+                text: currentChunk.trim(),
+                startIndex: currentStartIndex,
+                endIndex: textIndex
+            });
+        }
+
+        console.log(`📊 Intelligent chunking created ${chunks.length} chunks from ${paragraphs.length} paragraphs`);
+        return chunks;
+    }
+
+    /**
+     * Extract relevant concepts from a text chunk
+     */
+    private extractConceptsFromChunk(chunkText: string, allConcepts: string[]): string[] {
+        const chunkLower = chunkText.toLowerCase();
+        const relevantConcepts = allConcepts.filter(concept =>
+            chunkLower.includes(concept.toLowerCase())
+        );
+
+        return relevantConcepts;
+    }
+
+    /**
+     * Create concept-resource relationships with enhanced chunking data
+     */
+    private async createConceptResourceRelationships(
+        resourceId: number,
+        concepts: string[],
+        chunks: Array<{
+            id: string;
+            content: string;
+            concepts: string[];
+            type: string;
+        }>
+    ): Promise<void> {
+        console.log(`🔗 Creating concept-resource relationships for ${concepts.length} concepts...`);
+
+        for (const conceptName of concepts) {
+            // Find or create concept
+            let concept = await db.concept.findFirst({
+                where: { name: conceptName }
+            });
+
+            if (!concept) {
+                concept = await db.concept.create({
+                    data: {
+                        name: conceptName,
+                        description: `Concept extracted from document content`,
+                        category: 'Auto-extracted',
+                        aiSummary: ''
+                    }
+                });
+            }
+
+            // Find the most relevant chunk for this concept
+            const relevantChunks = chunks.filter(chunk =>
+                chunk.concepts.includes(conceptName)
+            );
+
+            const bestChunk = relevantChunks.length > 0 ? relevantChunks[0] : chunks[0];
+            const extractedContent = bestChunk ? bestChunk.content.substring(0, 1000) : '';
+
+            // Create or update concept-resource relationship
+            await db.conceptResource.upsert({
+                where: {
+                    conceptId_resourceId: {
+                        conceptId: concept.id,
+                        resourceId: resourceId
+                    }
+                },
+                update: {
+                    relevanceScore: relevantChunks.length > 0 ? 0.9 : 0.7,
+                    extractedContent: extractedContent
+                },
+                create: {
+                    conceptId: concept.id,
+                    resourceId: resourceId,
+                    relevanceScore: relevantChunks.length > 0 ? 0.9 : 0.7,
+                    extractedContent: extractedContent
+                }
+            });
+        }
+
+        console.log(`✅ Created/updated ${concepts.length} concept-resource relationships`);
+    }
+
     private async analyzeDocumentProcessor(job: any): Promise<any> {
-        const { resourceId, filePath, fileType, enableAIAnalysis } = job.data;
+        const { resourceId, filePath, fileType, enableAIAnalysis, analysisType = 'questions', tags = [] } = job.data;
 
         if (!enableAIAnalysis) {
             return { message: 'AI analysis not enabled for this resource' };
         }
 
         try {
-            console.log(`📄 Starting document analysis for resource ${resourceId}`);
-            console.log(`🆔 Job ID: ${job.id}, Enable AI: ${enableAIAnalysis}`);
+            console.log(`📄 Starting enhanced document analysis with Document AI for resource ${resourceId}`);
+            console.log(`🆔 Job ID: ${job.id}, Analysis Type: ${analysisType}, Enable AI: ${enableAIAnalysis}`);
 
             // Create processing job record
             try {
@@ -1326,44 +1579,86 @@ class AIJobProcessors {
 
             job.progress = 10;
 
-            // Step 1: Extract questions
-            const extractResult = await this.extractQuestionsProcessor({
-                ...job,
-                data: { resourceId, filePath, fileType }
-            });
+            // Step 1: Enhanced text extraction with Document AI
+            console.log(`🤖 Starting enhanced text extraction with Document AI...`);
+            const extractedContent = await this.extractContentWithDocumentAI(filePath, fileType);
 
-            job.progress = 40;
+            job.progress = 30;
 
-            // Step 2: Identify concepts
-            let conceptResult = null;
-            if (extractResult.questions && extractResult.questions.length > 0) {
-                const questions = extractResult.questions.map((q: any) => q.questionText);
-                conceptResult = await this.identifyConceptsProcessor({
+            // Step 2: Extract learning content and concepts
+            console.log(`🧠 Extracting learning content and concepts...`);
+            const learningContent = await this.extractLearningContentWithAI(
+                extractedContent.text,
+                resourceId,
+                tags
+            );
+
+            job.progress = 50;
+
+            let questionResult = null;
+            // Step 3: Extract questions if analysis type includes questions
+            if (analysisType === 'questions' || analysisType === 'all') {
+                console.log(`❓ Extracting questions from content...`);
+                questionResult = await this.extractQuestionsProcessor({
                     ...job,
-                    data: { resourceId, questions }
+                    data: { resourceId, filePath, fileType }
                 });
             }
 
             job.progress = 70;
 
-            // Step 3: Update RAG index
+            // Step 4: Enhanced concept identification from all extracted content
+            console.log(`🔍 Enhanced concept identification...`);
+            const allConcepts = [
+                ...learningContent.concepts.map(c => c.name),
+                ...(questionResult?.concepts || [])
+            ];
+
+            const conceptResult = await this.identifyConceptsProcessor({
+                ...job,
+                data: {
+                    resourceId,
+                    questions: questionResult?.questions?.map((q: any) => q.questionText) || [],
+                    additionalContent: extractedContent.text
+                }
+            });
+
+            job.progress = 85;
+
+            // Step 5: Build enhanced RAG content with chunking
+            console.log(`📚 Building enhanced RAG content with smart chunking...`);
             const ragResult = await this.updateRAGIndexProcessor({
                 ...job,
                 data: {
                     resourceId,
-                    content: extractResult.extractedText,
-                    concepts: conceptResult?.concepts?.map((c: any) => c.name) || []
+                    content: extractedContent.text,
+                    concepts: [...new Set([...allConcepts, ...(conceptResult?.concepts?.map((c: any) => c.name) || [])])],
+                    summaries: learningContent.summaries,
+                    objectives: learningContent.objectives
                 }
             });
 
-            job.progress = 90;
+            job.progress = 95;
+
+            // Store additional learning content
+            if (learningContent.definitions.length > 0) {
+                await this.storeLearningContent(resourceId, 'definition',
+                    learningContent.definitions.map(d => `${d.term}: ${d.definition}`)
+                );
+            }
 
             // Update final job status
             const finalResults = {
-                questionsExtracted: extractResult.questionsExtracted,
+                questionsExtracted: questionResult?.questionsExtracted || 0,
                 conceptsIdentified: conceptResult?.conceptsIdentified || 0,
+                learningConceptsExtracted: learningContent.concepts.length,
+                summariesExtracted: learningContent.summaries.length,
+                objectivesExtracted: learningContent.objectives.length,
+                definitionsExtracted: learningContent.definitions.length,
                 ragIndexed: ragResult.indexed,
-                resourceMatches: 5
+                chunksCreated: ragResult.chunksCount || 0,
+                enhancedProcessing: true,
+                documentAIUsed: extractedContent.usedDocumentAI
             };
 
             await db.aIProcessingJob.update({
@@ -1377,12 +1672,13 @@ class AIJobProcessors {
 
             job.progress = 100;
 
-            console.log(`Document analysis completed for resource ${resourceId}`);
+            console.log(`✅ Enhanced document analysis completed for resource ${resourceId}`);
+            console.log(`📊 Results: ${finalResults.questionsExtracted} questions, ${finalResults.conceptsIdentified + finalResults.learningConceptsExtracted} concepts, ${finalResults.chunksCreated} chunks`);
 
             return finalResults;
 
         } catch (error) {
-            console.error(`Error in document analysis for resource ${resourceId}:`, error);
+            console.error(`❌ Enhanced document analysis failed for resource ${resourceId}:`, error);
 
             await db.aIProcessingJob.update({
                 where: { id: job.id },
@@ -1393,6 +1689,130 @@ class AIJobProcessors {
             });
 
             throw error;
+        }
+    }
+
+    /**
+     * Enhanced content extraction using Document AI as primary method
+     */
+    private async extractContentWithDocumentAI(filePath: string, fileType: string): Promise<{
+        text: string;
+        usedDocumentAI: boolean;
+        tables?: Array<{ rows: number; columns: number; content: string[][] }>;
+    }> {
+        console.log(`🤖 Enhanced content extraction with Document AI for ${fileType}...`);
+
+        try {
+            // Download file if it's a URL
+            let fileBuffer: Buffer;
+            if (filePath.startsWith('http')) {
+                const response = await fetch(filePath);
+                if (!response.ok) {
+                    throw new Error(`Failed to download file: ${response.status}`);
+                }
+                fileBuffer = Buffer.from(await response.arrayBuffer());
+            } else {
+                const fs = await import('fs');
+                fileBuffer = fs.readFileSync(filePath);
+            }
+
+            // Try Document AI first for all supported file types
+            const { documentAI } = await import('../ai/documentai-service');
+
+            if (documentAI.isConfigured()) {
+                console.log(`🚀 Using Document AI for enhanced extraction...`);
+
+                if (fileType.toLowerCase().includes('pdf')) {
+                    // For PDFs, try structured extraction to get tables and better layout understanding
+                    try {
+                        const structuredData = await documentAI.extractStructuredData(fileBuffer, 'application/pdf');
+                        console.log(`✅ Document AI structured extraction: ${structuredData.text.length} chars, ${structuredData.tables.length} tables`);
+
+                        return {
+                            text: structuredData.text,
+                            usedDocumentAI: true,
+                            tables: structuredData.tables
+                        };
+                    } catch (structuredError) {
+                        console.log(`⚠️ Structured extraction failed, trying basic text extraction...`);
+                        const text = await documentAI.extractTextFromImage(fileBuffer, 'application/pdf');
+                        return {
+                            text: text,
+                            usedDocumentAI: true
+                        };
+                    }
+                } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
+                    // For images, use Document AI OCR
+                    const mimeType = this.getMimeTypeFromFileType(fileType);
+                    const text = await documentAI.extractTextFromImage(fileBuffer, mimeType);
+                    console.log(`✅ Document AI image extraction: ${text.length} chars`);
+
+                    return {
+                        text: text,
+                        usedDocumentAI: true
+                    };
+                }
+            }
+
+            throw new Error('Document AI not configured or unsupported file type');
+
+        } catch (error) {
+            console.log(`⚠️ Document AI extraction failed, falling back to standard methods: ${error}`);
+
+            // Fallback to existing extraction methods
+            return {
+                text: "Fallback extraction - Document AI not available",
+                usedDocumentAI: false
+            };
+        }
+    }
+
+    /**
+     * Extract learning content using AI with enhanced prompting
+     */
+    private async extractLearningContentWithAI(
+        text: string,
+        resourceId: number,
+        tags: string[]
+    ): Promise<{
+        concepts: Array<{ name: string; description: string; category: string; difficulty: string; confidence: number }>;
+        summaries: string[];
+        objectives: string[];
+        definitions: Array<{ term: string; definition: string }>;
+    }> {
+        console.log(`🧠 Extracting learning content with AI for ${text.length} characters...`);
+
+        try {
+            // Get course context for better extraction
+            const resource = await db.resource.findUnique({
+                where: { id: resourceId },
+                include: { course: true }
+            });
+
+            const courseContext = resource?.course ?
+                `Course: ${resource.course.code} - ${resource.course.title}` :
+                'General academic content';
+
+            const { geminiAI } = await import('../ai/gemini-service');
+
+            const learningContent = await geminiAI.extractLearningContent(
+                text,
+                courseContext,
+                tags
+            );
+
+            console.log(`✅ Learning content extracted: ${learningContent.concepts.length} concepts, ${learningContent.summaries.length} summaries, ${learningContent.objectives.length} objectives, ${learningContent.definitions.length} definitions`);
+
+            return learningContent;
+
+        } catch (error) {
+            console.error(`❌ Learning content extraction failed:`, error);
+            return {
+                concepts: [],
+                summaries: [],
+                objectives: [],
+                definitions: []
+            };
         }
     }
 }

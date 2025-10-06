@@ -140,7 +140,7 @@ class AIJobProcessors {
                 job.progress = 20;
 
                 try {
-                    const pdfjsLibLegacy = await import('pdfjs-dist');
+                    const pdfjsLibLegacy = await import('pdfjs-dist/legacy/build/pdf');
                     const pdfjsLib = pdfjsLibLegacy; // Use legacy build at runtime
                     if (typeof window === 'undefined') {
                         console.log('🔧 Configuring PDF.js for server-side processing (no worker)');

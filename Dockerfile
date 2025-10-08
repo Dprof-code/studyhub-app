@@ -24,16 +24,34 @@ COPY . .
 # Generate Prisma Client
 RUN npx prisma generate
 
+# Build arguments for environment variables
+ARG DATABASE_URL
+ARG GEMINI_API_KEY
+ARG GOOGLE_CLOUD_PROJECT_ID
+ARG NEXTAUTH_SECRET
+ARG NEXTAUTH_URL
+ARG GOOGLE_CLIENT_ID
+ARG GOOGLE_CLIENT_SECRET
+
+# Set environment variables for build
+ENV DATABASE_URL=$DATABASE_URL
+ENV GEMINI_API_KEY=$GEMINI_API_KEY
+ENV GOOGLE_CLOUD_PROJECT_ID=$GOOGLE_CLOUD_PROJECT_ID
+ENV NEXTAUTH_SECRET=$NEXTAUTH_SECRET
+ENV NEXTAUTH_URL=$NEXTAUTH_URL
+ENV GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+ENV GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+ENV NEXT_TELEMETRY_DISABLED=1
+
 # Build Next.js
-ENV NEXT_TELEMETRY_DISABLED 1
 RUN npm run build:docker
 
 # Production image
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 nodejs
@@ -57,8 +75,8 @@ USER nextjs
 
 EXPOSE 3000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
 # Start the custom server
 CMD ["node_modules/.bin/ts-node", "--project", "tsconfig.server.json", "server.ts"]

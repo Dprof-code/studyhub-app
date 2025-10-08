@@ -1,0 +1,21 @@
+# .slugignore
+*.md
+*.log
+.git
+.gitignore
+.env.local
+.env.development
+.vscode
+.idea
+docs/
+test/
+tests/
+__tests__/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+coverage/
+.next/cache/
+node_modules/.cache/
+.DS_Store

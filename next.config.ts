@@ -1,4 +1,4 @@
-import {withSentryConfig} from '@sentry/nextjs';
+import { withSentryConfig } from '@sentry/nextjs';
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -50,6 +50,7 @@ const nextConfig: NextConfig = {
     return config;
   },
   serverExternalPackages: ['socket.io'],
+  output: 'standalone',
 
   // Ensure proper handling of static files
   experimental: {

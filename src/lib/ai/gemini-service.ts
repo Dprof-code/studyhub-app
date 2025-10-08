@@ -25,24 +25,42 @@ interface ResourceMatch {
 }
 
 export class GeminiAIService {
-    private genAI: GoogleGenerativeAI;
-    private model: any;
+    private genAI: GoogleGenerativeAI | null = null;
+    private model: any = null;
+    private initialized = false;
 
     constructor() {
-        if (!process.env.GEMINI_API_KEY) {
-            throw new Error('GEMINI_API_KEY environment variable is required');
-        }
-        this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+        // Don't initialize during construction
     }
+
+    private ensureInitialized() {
+        if (!this.initialized) {
+            if (!process.env.GEMINI_API_KEY) {
+                throw new Error('GEMINI_API_KEY environment variable is required');
+            }
+            this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+            this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+            this.initialized = true;
+        }
+    }
+
+    // constructor() {
+    //     if (!process.env.GEMINI_API_KEY) {
+    //         throw new Error('GEMINI_API_KEY environment variable is required');
+    //     }
+    //     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    //     this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+    // }
 
     /**
      * Extract text directly from image using Gemini Vision
      */
     async extractTextFromImage(base64Image: string, mimeType: string): Promise<string> {
+        this.ensureInitialized(); // Initialize only when needed
         try {
             // Use Gemini 1.5 model which supports vision natively
-            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+            // const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+            const visionModel = this.genAI!.getGenerativeModel({ model: 'gemini-2.5-pro' });
 
             const prompt = `
 You are an expert document text extractor. Extract ALL text from this image, which appears to be an academic document, exam paper, or educational material.
@@ -86,9 +104,10 @@ Return only the extracted text without any additional formatting or comments.
      * Extract questions directly from image using Gemini Vision
      */
     async extractQuestionsFromImage(base64Image: string, mimeType: string, courseContext?: string): Promise<ExtractedQuestion[]> {
+        this.ensureInitialized();
         try {
             // Use Gemini 1.5 model which supports vision natively
-            const visionModel = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const visionModel = this.genAI!.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
             const prompt = `
 You are an expert academic question extractor with computer vision capabilities. Analyze this image which appears to be an exam paper, past question paper, or academic test.
@@ -1231,6 +1250,7 @@ Provide insights in JSON format:
      * Generate content with the Gemini AI model
      */
     async generateContent(prompt: string): Promise<any> {
+        this.ensureInitialized();
         try {
             const result = await this.model.generateContent(prompt);
             return result;

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "ts-node --project tsconfig.server.json server.ts",
     "build": "prisma generate && prisma migrate deploy && next build",
+    "build:docker": "prisma generate && next build",
     "start": "cross-env NODE_ENV=production ts-node --project tsconfig.server.json server.ts",
     "lint": "next lint",
     "postinstall": "prisma generate"

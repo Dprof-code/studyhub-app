@@ -1,0 +1,9 @@
+build:
+  docker:
+    web: Dockerfile
+release:
+  command:
+    - npx prisma migrate deploy
+  image: web
+run:
+  web: node_modules/.bin/ts-node --project tsconfig.server.json server.ts

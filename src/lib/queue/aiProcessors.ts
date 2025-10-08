@@ -39,8 +39,20 @@ export interface AnalyzeDocumentJobData {
     tags?: string[]; // Resource tags for context
 }
 
+// Interface for Document AI table structure
+interface DocumentAITable {
+    rows: number;
+    columns: number;
+    content: string[][];
+}
+
 // AI Processing Job Processors
 class AIJobProcessors {
+    private documentAIQuotaExhausted = false;
+    private documentAILastQuotaReset = Date.now();
+    private documentAIFailureCount = 0;
+    private documentAICircuitBreakerTimeout = 0;
+
     constructor() {
         // Simple constructor without external dependencies
     }
@@ -55,6 +67,71 @@ class AIJobProcessors {
 
         console.log('✅ AI Job Processors initialized successfully');
         console.log('📋 Registered processors:', Object.values(JOB_TYPES));
+    }
+
+    /**
+     * Check if Document AI should be used based on quota and circuit breaker status
+     */
+    private shouldUseDocumentAI(): boolean {
+        const now = Date.now();
+
+        // Reset quota status every hour
+        if (now - this.documentAILastQuotaReset > 60 * 60 * 1000) {
+            this.documentAIQuotaExhausted = false;
+            this.documentAIFailureCount = 0;
+            this.documentAILastQuotaReset = now;
+            console.log('🔄 Document AI quota status reset');
+        }
+
+        // Check circuit breaker
+        if (this.documentAICircuitBreakerTimeout > now) {
+            console.log('⚡ Document AI circuit breaker is open, skipping');
+            return false;
+        }
+
+        // Check quota status
+        if (this.documentAIQuotaExhausted) {
+            console.log('📊 Document AI quota exhausted, skipping');
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Handle Document AI errors and update circuit breaker status
+     */
+    private handleDocumentAIError(error: any): void {
+        const errorMessage = error?.message || String(error);
+
+        // Check for quota exhaustion
+        if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('Quota exceeded')) {
+            console.log('📊 Document AI quota exhausted detected');
+            this.documentAIQuotaExhausted = true;
+            this.documentAIFailureCount++;
+        }
+
+        // Check for timeout or deadline exceeded
+        if (errorMessage.includes('DEADLINE_EXCEEDED') || errorMessage.includes('timeout')) {
+            console.log('⏰ Document AI timeout detected');
+            this.documentAIFailureCount++;
+        }
+
+        // Activate circuit breaker if too many failures
+        if (this.documentAIFailureCount >= 3) {
+            this.documentAICircuitBreakerTimeout = Date.now() + (15 * 60 * 1000); // 15 minutes
+            console.log('⚡ Document AI circuit breaker activated for 15 minutes');
+        }
+    }
+
+    /**
+     * Add delay between Document AI requests to respect rate limits
+     */
+    private async addDocumentAIDelay(): Promise<void> {
+        // Add 2-5 second delay between requests to avoid hitting rate limits
+        const delay = 2000 + Math.random() * 3000;
+        console.log(`⏱️ Adding ${(delay / 1000).toFixed(1)}s delay for Document AI rate limiting`);
+        await new Promise(resolve => setTimeout(resolve, delay));
     }
 
     public async extractQuestionsProcessor(job: any): Promise<any> {
@@ -134,268 +211,151 @@ class AIJobProcessors {
                 console.log(`✅ Read local file, size: ${fileBuffer.length} bytes`);
             }
 
-            // 1. Extract text from PDF or image with Document AI as primary method
+            // 1. Extract text from PDF or image with smart Document AI quota management
             if (fileType.toLowerCase().includes('pdf')) {
-                console.log(`📖 Processing PDF file (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB) with Document AI...`);
+                console.log(`📖 Processing PDF file (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB) with smart quota management...`);
                 job.progress = 20;
 
-                try {
-                    // Import Document AI service for PDF processing
-                    const { documentAI } = await import('../ai/documentai-service');
-
-                    console.log(`🤖 Using Google Cloud Document AI for PDF text extraction...`);
-                    console.log(`📊 PDF details: application/pdf, size: ${fileBuffer.length} bytes`);
-
-                    // Check if Document AI is configured
-                    const configStatus = documentAI.getConfigurationStatus();
-                    console.log(`⚙️ Document AI configuration:`, configStatus);
-
-                    if (documentAI.isConfigured()) {
-                        // Use Document AI for PDF processing
-                        const documentAIResult = await Promise.race([
-                            documentAI.extractTextFromImage(fileBuffer, 'application/pdf'),
-                            new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('Document AI PDF processing timeout after 5 minutes')), 300000)
-                            )
-                        ]) as string;
-
-                        extractedText = documentAIResult;
-                        console.log(`✅ Document AI PDF processing complete, extracted ${extractedText.length} characters`);
-                        console.log(`📄 Document AI PDF output preview:`, extractedText.substring(0, 500));
-
-                        // If Document AI returns very little text, try structured extraction
-                        if (extractedText.length < 200) {
-                            console.log(`🔄 Low text content, trying Document AI structured extraction...`);
-                            try {
-                                const structuredData = await documentAI.extractStructuredData(fileBuffer, 'application/pdf');
-                                if (structuredData.text && structuredData.text.length > extractedText.length) {
-                                    extractedText = structuredData.text;
-                                    console.log(`✅ Document AI structured extraction provided better text (${extractedText.length} chars)`);
-                                }
-
-                                // Also extract table content if available
-                                if (structuredData.tables && structuredData.tables.length > 0) {
-                                    let tableText = '\n\n--- TABLES ---\n';
-                                    structuredData.tables.forEach((table, index) => {
-                                        tableText += `\nTable ${index + 1} (${table.rows}x${table.columns}):\n`;
-                                        table.content.forEach(row => {
-                                            tableText += row.join(' | ') + '\n';
-                                        });
-                                    });
-                                    extractedText += tableText;
-                                    console.log(`✅ Added ${structuredData.tables.length} tables to extracted text`);
-                                }
-                            } catch (structuredError) {
-                                console.log(`⚠️ Structured extraction failed, using initial result`);
-                            }
-                        }
-
-                        // Update progress
-                        job.progress = 50;
-                    } else {
-                        throw new Error('Document AI not configured, falling back to PDF.js');
-                    }
-
-                } catch (documentAIError) {
-                    console.error(`❌ Document AI PDF processing failed:`, documentAIError);
-                    console.log(`🔄 Falling back to PDF.js for PDF processing...`);
-
+                // Check if we should use Document AI based on quota and circuit breaker
+                if (this.shouldUseDocumentAI()) {
                     try {
-                        // Fallback to PDF.js processing
-                        const pdfjsLib = await import('pdfjs-dist');
+                        // Add rate limiting delay
+                        await this.addDocumentAIDelay();
 
-                        // Configure PDF.js for server-side use
-                        if (typeof window === 'undefined') {
-                            console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
-                            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-                        }
+                        // Import Document AI service for PDF processing
+                        const { documentAI } = await import('../ai/documentai-service');
 
-                        const data = new Uint8Array(fileBuffer);
-                        console.log(`🔧 Creating PDF.js loading task...`);
+                        console.log(`🤖 Using Google Cloud Document AI for PDF text extraction...`);
+                        console.log(`📊 PDF details: application/pdf, size: ${fileBuffer.length} bytes`);
 
-                        const loadingTask = pdfjsLib.getDocument({
-                            data,
-                            verbosity: 0, // Reduce logging
-                            maxImageSize: 1024 * 1024, // 1MB max image size
-                            disableFontFace: true, // Disable font loading for speed
-                            disableRange: true, // Disable range requests
-                            disableStream: true // Disable streaming
-                        });
+                        // Check if Document AI is configured
+                        const configStatus = documentAI.getConfigurationStatus();
+                        console.log(`⚙️ Document AI configuration:`, configStatus);
 
-                        // Add comprehensive timeout to PDF processing
-                        const pdf = await Promise.race([
-                            loadingTask.promise,
-                            new Promise((_, reject) => {
-                                setTimeout(() => {
-                                    console.log('⏰ PDF.js loading timeout (120s)');
-                                    reject(new Error('PDF.js loading timeout after 120 seconds'));
-                                }, 120000); // 2 minute timeout
-                            })
-                        ]) as any;
-
-                        let text = '';
-                        const totalPages = pdf.numPages;
-                        console.log(`📄 PDF has ${totalPages} pages, starting PDF.js extraction...`);
-
-                        // Limit page processing for very large documents
-                        const maxPages = Math.min(totalPages, 50); // Process max 50 pages for fallback
-                        if (totalPages > maxPages) {
-                            console.log(`⚠️ Large PDF detected (${totalPages} pages). Processing first ${maxPages} pages only.`);
-                        }
-
-                        for (let i = 1; i <= maxPages; i++) {
-                            try {
-                                console.log(`📄 Processing page ${i}/${maxPages}...`);
-
-                                // Add timeout for each page
-                                const pagePromise = pdf.getPage(i);
-                                const page = await Promise.race([
-                                    pagePromise,
-                                    new Promise((_, reject) => {
-                                        setTimeout(() => {
-                                            reject(new Error(`Page ${i} processing timeout`));
-                                        }, 30000); // 30s per page
-                                    })
-                                ]) as any;
-
-                                const content = await page.getTextContent();
-                                const pageText = content.items.map((item: any) => item.str).join(' ');
-                                text += pageText + '\n';
-
-                                // Update progress incrementally
-                                job.progress = 20 + (i / maxPages) * 30;
-
-                                // Log progress every 10 pages
-                                if (i % 10 === 0 || i === maxPages) {
-                                    console.log(`✅ Processed ${i}/${maxPages} pages, extracted ${text.length} characters so far`);
-                                }
-
-                                // Memory management: if text is getting very large, break early
-                                if (text.length > 500000) { // 500KB of text for fallback
-                                    console.log(`⚠️ Large text content detected (${text.length} chars). Stopping early to prevent memory issues.`);
-                                    break;
-                                }
-
-                            } catch (pageError) {
-                                console.error(`❌ Error processing page ${i}:`, pageError instanceof Error ? pageError.message : String(pageError));
-                                // Continue with next page instead of failing completely
-                                continue;
-                            }
-                        }
-
-                        extractedText = text;
-                        console.log(`✅ PDF.js fallback processing complete! Extracted ${text.length} characters from ${maxPages} pages`);
-
-                        if (text.length < 100) {
-                            console.log(`⚠️ Very little text extracted. PDF might be image-based or corrupted.`);
-                            throw new Error('PDF contains insufficient text content. It may be image-based or corrupted.');
-                        }
-                    } catch (pdfError) {
-                        console.error(`❌ Both Document AI and PDF.js processing failed:`, pdfError);
-                        throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
-                    }
-                }
-            } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                console.log(`🖼️ Processing image file with Document AI OCR...`);
-                job.progress = 20;
-
-                try {
-                    // Import Document AI service for OCR processing
-                    const { documentAI } = await import('../ai/documentai-service');
-
-                    console.log(`� Using Google Cloud Document AI for text extraction...`);
-                    console.log(`📊 Image details: ${this.getMimeTypeFromFileType(fileType)}, size: ${fileBuffer.length} bytes`);
-
-                    // Check if Document AI is configured
-                    const configStatus = documentAI.getConfigurationStatus();
-                    console.log(`⚙️ Document AI configuration:`, configStatus);
-
-                    if (documentAI.isConfigured()) {
-                        // Use Document AI for OCR
-                        const mimeType = this.getMimeTypeFromFileType(fileType);
-
-                        const documentAIResult = await Promise.race([
-                            documentAI.extractTextFromImage(fileBuffer, mimeType),
-                            new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('Document AI processing timeout after 2 minutes')), 120000)
-                            )
-                        ]) as string;
-
-                        extractedText = documentAIResult;
-                        console.log(`✅ Document AI processing complete, extracted ${extractedText.length} characters`);
-                        console.log(`📄 Document AI output preview:`, extractedText.substring(0, 500));
-                    } else {
-                        throw new Error('Document AI not configured, falling back to alternative OCR');
-                    }
-
-                } catch (documentAIError) {
-                    console.error(`❌ Document AI processing failed:`, documentAIError);
-                    console.log(`🔄 Falling back to Gemini Vision OCR...`);
-
-                    try {
-                        // Fallback to Gemini Vision OCR
-                        const { geminiAI } = await import('../ai/gemini-service');
-
-                        const base64Image = fileBuffer.toString('base64');
-                        const mimeType = this.getMimeTypeFromFileType(fileType);
-
-                        const geminiResult = await Promise.race([
-                            geminiAI.extractTextFromImage(base64Image, mimeType),
-                            new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('Gemini Vision timeout after 90 seconds')), 90000)
-                            )
-                        ]) as string;
-
-                        extractedText = geminiResult;
-                        console.log(`✅ Gemini Vision fallback complete, extracted ${extractedText.length} characters`);
-                    } catch (geminiError) {
-                        console.error(`❌ Gemini Vision fallback failed:`, geminiError);
-                        console.log(`🔄 Falling back to traditional OCR...`);
-
-                        try {
-                            // Final fallback to traditional OCR
-                            const tempDir = os.tmpdir();
-                            const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                            console.log(`📁 Using temporary file path for OCR fallback: ${tempFilePath}`);
-                            fs.writeFileSync(tempFilePath, fileBuffer);
-
-                            // Enhanced OCR configuration for better text extraction
-                            const config = {
-                                lang: 'eng',
-                                oem: 1, // LSTM-based OCR engine
-                                psm: 6, // Uniform block of text (better for exam papers)
-                            };
-
-                            console.log(`🔧 Starting traditional OCR with node-tesseract-ocr...`);
-
-                            const ocrResult = await Promise.race([
-                                tesseract.recognize(tempFilePath, config),
+                        if (documentAI.isConfigured()) {
+                            // Use Document AI for PDF processing with shorter timeout
+                            const documentAIResult = await Promise.race([
+                                documentAI.extractTextFromImage(fileBuffer, 'application/pdf'),
                                 new Promise((_, reject) =>
-                                    setTimeout(() => reject(new Error('OCR processing timeout after 90 seconds')), 90000)
+                                    setTimeout(() => reject(new Error('Document AI PDF processing timeout after 2 minutes')), 120000)
                                 )
                             ]) as string;
 
-                            extractedText = ocrResult;
-                            console.log(`✅ Traditional OCR processing complete, extracted ${extractedText.length} characters`);
+                            extractedText = documentAIResult;
+                            console.log(`✅ Document AI PDF processing complete, extracted ${extractedText.length} characters`);
+                            console.log(`📄 Document AI PDF output preview:`, extractedText.substring(0, 500));
 
-                            // Clean up temporary file
-                            fs.unlinkSync(tempFilePath);
-                        } catch (ocrError) {
-                            console.error(`❌ All OCR methods failed:`, ocrError);
-                            extractedText = "All OCR processing methods failed. This may be due to poor image quality, unsupported format, network issues, or configuration problems. Please try with a clearer, higher-resolution image in a standard format (PNG, JPG), or check your API configurations.";
+                            // Reset failure count on success
+                            this.documentAIFailureCount = 0;
 
-                            // Attempt to clean up if file exists
-                            try {
-                                const tempDir = os.tmpdir();
-                                const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
-                                if (fs.existsSync(tempFilePath)) {
-                                    fs.unlinkSync(tempFilePath);
+                            // If Document AI returns very little text, try structured extraction
+                            if (extractedText.length < 200) {
+                                console.log(`🔄 Low text content, trying Document AI structured extraction...`);
+                                try {
+                                    await this.addDocumentAIDelay(); // Rate limit for second request
+                                    const structuredData = await Promise.race([
+                                        documentAI.extractStructuredData(fileBuffer, 'application/pdf'),
+                                        new Promise((_, reject) =>
+                                            setTimeout(() => reject(new Error('Document AI structured extraction timeout')), 60000)
+                                        )
+                                    ]) as any;
+
+                                    if (structuredData.text && structuredData.text.length > extractedText.length) {
+                                        extractedText = structuredData.text;
+                                        console.log(`✅ Document AI structured extraction provided better text (${extractedText.length} chars)`);
+                                    }
+
+                                    // Also extract table content if available
+                                    if (structuredData.tables && structuredData.tables.length > 0) {
+                                        let tableText = '\n\n--- TABLES ---\n';
+                                        structuredData.tables.forEach((table: DocumentAITable, index: number) => {
+                                            tableText += `\nTable ${index + 1} (${table.rows}x${table.columns}):\n`;
+                                            table.content.forEach((row: string[]) => {
+                                                tableText += row.join(' | ') + '\n';
+                                            });
+                                        });
+                                        extractedText += tableText;
+                                        console.log(`✅ Added ${structuredData.tables.length} tables to extracted text`);
+                                    }
+                                } catch (structuredError) {
+                                    console.log(`⚠️ Structured extraction failed, using initial result:`, structuredError instanceof Error ? structuredError.message : String(structuredError));
                                 }
-                            } catch (cleanupError) {
-                                console.error(`❌ Failed to clean up temp file:`, cleanupError);
                             }
+
+                            // Update progress
+                            job.progress = 50;
+                        } else {
+                            throw new Error('Document AI not configured, falling back to PDF.js');
                         }
+
+                    } catch (documentAIError) {
+                        console.error(`❌ Document AI PDF processing failed:`, documentAIError);
+
+                        // Handle the error and update circuit breaker status
+                        this.handleDocumentAIError(documentAIError);
+
+                        console.log(`🔄 Falling back to PDF.js for PDF processing...`);
+
+                        // Fall through to PDF.js processing
+                        extractedText = await this.processPDFWithFallback(fileBuffer, job);
                     }
+                } else {
+                    console.log(`⚠️ Document AI unavailable (quota/circuit breaker), using PDF.js directly...`);
+                    extractedText = await this.processPDFWithFallback(fileBuffer, job);
+                }
+            } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
+                console.log(`🖼️ Processing image file with smart quota management...`);
+                job.progress = 20;
+
+                // Check if we should use Document AI based on quota and circuit breaker
+                if (this.shouldUseDocumentAI()) {
+                    try {
+                        // Add rate limiting delay
+                        await this.addDocumentAIDelay();
+
+                        // Import Document AI service for OCR processing
+                        const { documentAI } = await import('../ai/documentai-service');
+
+                        console.log(`🤖 Using Google Cloud Document AI for text extraction...`);
+                        console.log(`📊 Image details: ${this.getMimeTypeFromFileType(fileType)}, size: ${fileBuffer.length} bytes`);
+
+                        // Check if Document AI is configured
+                        const configStatus = documentAI.getConfigurationStatus();
+                        console.log(`⚙️ Document AI configuration:`, configStatus);
+
+                        if (documentAI.isConfigured()) {
+                            // Use Document AI for OCR with shorter timeout
+                            const mimeType = this.getMimeTypeFromFileType(fileType);
+
+                            const documentAIResult = await Promise.race([
+                                documentAI.extractTextFromImage(fileBuffer, mimeType),
+                                new Promise((_, reject) =>
+                                    setTimeout(() => reject(new Error('Document AI image processing timeout after 90 seconds')), 90000)
+                                )
+                            ]) as string;
+
+                            extractedText = documentAIResult;
+                            console.log(`✅ Document AI processing complete, extracted ${extractedText.length} characters`);
+                            console.log(`📄 Document AI output preview:`, extractedText.substring(0, 500));
+
+                            // Reset failure count on success
+                            this.documentAIFailureCount = 0;
+                        } else {
+                            throw new Error('Document AI not configured, falling back to alternative OCR');
+                        }
+
+                    } catch (documentAIError) {
+                        console.error(`❌ Document AI processing failed:`, documentAIError);
+
+                        // Handle the error and update circuit breaker status
+                        this.handleDocumentAIError(documentAIError);
+
+                        console.log(`🔄 Falling back to alternative OCR methods...`);
+                        extractedText = await this.processImageWithFallback(fileBuffer, fileType, job);
+                    }
+                } else {
+                    console.log(`⚠️ Document AI unavailable (quota/circuit breaker), using fallback OCR directly...`);
+                    extractedText = await this.processImageWithFallback(fileBuffer, fileType, job);
                 }
             } else {
                 throw new Error(`Unsupported file type for question extraction: ${fileType}`);
@@ -613,6 +573,178 @@ class AIJobProcessors {
             }
 
             throw error;
+        }
+    }
+
+    /**
+     * Helper method for PDF.js fallback processing
+     */
+    private async processPDFWithFallback(fileBuffer: Buffer, job: any): Promise<string> {
+        try {
+            // Fallback to PDF.js processing
+            const pdfjsLib = await import('pdfjs-dist');
+
+            // Configure PDF.js for server-side use
+            if (typeof window === 'undefined') {
+                console.log('🔧 Configuring PDF.js for server-side processing (no worker)');
+                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+            }
+
+            const data = new Uint8Array(fileBuffer);
+            console.log(`🔧 Creating PDF.js loading task...`);
+
+            const loadingTask = pdfjsLib.getDocument({
+                data,
+                verbosity: 0, // Reduce logging
+                maxImageSize: 1024 * 1024, // 1MB max image size
+                disableFontFace: true, // Disable font loading for speed
+                disableRange: true, // Disable range requests
+                disableStream: true // Disable streaming
+            });
+
+            // Add comprehensive timeout to PDF processing
+            const pdf = await Promise.race([
+                loadingTask.promise,
+                new Promise((_, reject) => {
+                    setTimeout(() => {
+                        console.log('⏰ PDF.js loading timeout (120s)');
+                        reject(new Error('PDF.js loading timeout after 120 seconds'));
+                    }, 120000); // 2 minute timeout
+                })
+            ]) as any;
+
+            let text = '';
+            const totalPages = pdf.numPages;
+            console.log(`📄 PDF has ${totalPages} pages, starting PDF.js extraction...`);
+
+            // Limit page processing for very large documents
+            const maxPages = Math.min(totalPages, 50); // Process max 50 pages for fallback
+            if (totalPages > maxPages) {
+                console.log(`⚠️ Large PDF detected (${totalPages} pages). Processing first ${maxPages} pages only.`);
+            }
+
+            for (let i = 1; i <= maxPages; i++) {
+                try {
+                    console.log(`📄 Processing page ${i}/${maxPages}...`);
+
+                    // Add timeout for each page
+                    const pagePromise = pdf.getPage(i);
+                    const page = await Promise.race([
+                        pagePromise,
+                        new Promise((_, reject) => {
+                            setTimeout(() => {
+                                reject(new Error(`Page ${i} processing timeout`));
+                            }, 30000); // 30s per page
+                        })
+                    ]) as any;
+
+                    const content = await page.getTextContent();
+                    const pageText = content.items.map((item: any) => item.str).join(' ');
+                    text += pageText + '\n';
+
+                    // Update progress incrementally
+                    job.progress = 20 + (i / maxPages) * 30;
+
+                    // Log progress every 10 pages
+                    if (i % 10 === 0 || i === maxPages) {
+                        console.log(`✅ Processed ${i}/${maxPages} pages, extracted ${text.length} characters so far`);
+                    }
+
+                    // Memory management: if text is getting very large, break early
+                    if (text.length > 500000) { // 500KB of text for fallback
+                        console.log(`⚠️ Large text content detected (${text.length} chars). Stopping early to prevent memory issues.`);
+                        break;
+                    }
+
+                } catch (pageError) {
+                    console.error(`❌ Error processing page ${i}:`, pageError instanceof Error ? pageError.message : String(pageError));
+                    // Continue with next page instead of failing completely
+                    continue;
+                }
+            }
+
+            console.log(`✅ PDF.js fallback processing complete! Extracted ${text.length} characters from ${maxPages} pages`);
+
+            if (text.length < 100) {
+                console.log(`⚠️ Very little text extracted. PDF might be image-based or corrupted.`);
+                throw new Error('PDF contains insufficient text content. It may be image-based or corrupted.');
+            }
+
+            return text;
+        } catch (pdfError) {
+            console.error(`❌ PDF.js processing failed:`, pdfError);
+            throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
+        }
+    }
+
+    /**
+     * Helper method for image OCR fallback processing
+     */
+    private async processImageWithFallback(fileBuffer: Buffer, fileType: string, job: any): Promise<string> {
+        try {
+            // Fallback to Gemini Vision OCR
+            const { geminiAI } = await import('../ai/gemini-service');
+
+            const base64Image = fileBuffer.toString('base64');
+            const mimeType = this.getMimeTypeFromFileType(fileType);
+
+            const geminiResult = await Promise.race([
+                geminiAI.extractTextFromImage(base64Image, mimeType),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Gemini Vision timeout after 90 seconds')), 90000)
+                )
+            ]) as string;
+
+            console.log(`✅ Gemini Vision fallback complete, extracted ${geminiResult.length} characters`);
+            return geminiResult;
+        } catch (geminiError) {
+            console.error(`❌ Gemini Vision fallback failed:`, geminiError);
+            console.log(`🔄 Falling back to traditional OCR...`);
+
+            try {
+                // Final fallback to traditional OCR
+                const tempDir = os.tmpdir();
+                const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
+                console.log(`📁 Using temporary file path for OCR fallback: ${tempFilePath}`);
+                fs.writeFileSync(tempFilePath, fileBuffer);
+
+                // Enhanced OCR configuration for better text extraction
+                const config = {
+                    lang: 'eng',
+                    oem: 1, // LSTM-based OCR engine
+                    psm: 6, // Uniform block of text (better for exam papers)
+                };
+
+                console.log(`🔧 Starting traditional OCR with node-tesseract-ocr...`);
+
+                const ocrResult = await Promise.race([
+                    tesseract.recognize(tempFilePath, config),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('OCR processing timeout after 90 seconds')), 90000)
+                    )
+                ]) as string;
+
+                console.log(`✅ Traditional OCR processing complete, extracted ${ocrResult.length} characters`);
+
+                // Clean up temporary file
+                fs.unlinkSync(tempFilePath);
+                return ocrResult;
+            } catch (ocrError) {
+                console.error(`❌ All OCR methods failed:`, ocrError);
+
+                // Attempt to clean up if file exists
+                try {
+                    const tempDir = os.tmpdir();
+                    const tempFilePath = path.join(tempDir, `temp_image_${job.id}.png`);
+                    if (fs.existsSync(tempFilePath)) {
+                        fs.unlinkSync(tempFilePath);
+                    }
+                } catch (cleanupError) {
+                    console.error(`❌ Failed to clean up temp file:`, cleanupError);
+                }
+
+                return "All OCR processing methods failed. This may be due to poor image quality, unsupported format, network issues, or configuration problems. Please try with a clearer, higher-resolution image in a standard format (PNG, JPG), or check your API configurations.";
+            }
         }
     }
 
@@ -1693,14 +1825,14 @@ class AIJobProcessors {
     }
 
     /**
-     * Enhanced content extraction using Document AI as primary method
+     * Enhanced content extraction using Document AI with quota management
      */
     private async extractContentWithDocumentAI(filePath: string, fileType: string): Promise<{
         text: string;
         usedDocumentAI: boolean;
         tables?: Array<{ rows: number; columns: number; content: string[][] }>;
     }> {
-        console.log(`🤖 Enhanced content extraction with Document AI for ${fileType}...`);
+        console.log(`🤖 Enhanced content extraction with quota management for ${fileType}...`);
 
         try {
             // Download file if it's a URL
@@ -1716,17 +1848,35 @@ class AIJobProcessors {
                 fileBuffer = fs.readFileSync(filePath);
             }
 
-            // Try Document AI first for all supported file types
+            // Check if we should use Document AI
+            if (!this.shouldUseDocumentAI()) {
+                console.log(`⚠️ Document AI unavailable (quota/circuit breaker), skipping...`);
+                throw new Error('Document AI quota exhausted or circuit breaker active');
+            }
+
+            // Try Document AI with rate limiting
             const { documentAI } = await import('../ai/documentai-service');
 
             if (documentAI.isConfigured()) {
                 console.log(`🚀 Using Document AI for enhanced extraction...`);
 
+                // Add rate limiting delay
+                await this.addDocumentAIDelay();
+
                 if (fileType.toLowerCase().includes('pdf')) {
                     // For PDFs, try structured extraction to get tables and better layout understanding
                     try {
-                        const structuredData = await documentAI.extractStructuredData(fileBuffer, 'application/pdf');
+                        const structuredData = await Promise.race([
+                            documentAI.extractStructuredData(fileBuffer, 'application/pdf'),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Document AI structured extraction timeout')), 120000)
+                            )
+                        ]) as any;
+
                         console.log(`✅ Document AI structured extraction: ${structuredData.text.length} chars, ${structuredData.tables.length} tables`);
+
+                        // Reset failure count on success
+                        this.documentAIFailureCount = 0;
 
                         return {
                             text: structuredData.text,
@@ -1735,17 +1885,38 @@ class AIJobProcessors {
                         };
                     } catch (structuredError) {
                         console.log(`⚠️ Structured extraction failed, trying basic text extraction...`);
-                        const text = await documentAI.extractTextFromImage(fileBuffer, 'application/pdf');
+
+                        // Handle error for circuit breaker
+                        this.handleDocumentAIError(structuredError);
+
+                        // Try basic extraction with rate limiting
+                        await this.addDocumentAIDelay();
+                        const text = await Promise.race([
+                            documentAI.extractTextFromImage(fileBuffer, 'application/pdf'),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Document AI basic extraction timeout')), 90000)
+                            )
+                        ]) as string;
+
                         return {
                             text: text,
                             usedDocumentAI: true
                         };
                     }
                 } else if (fileType.toLowerCase().match(/(jpg|jpeg|png|bmp|gif|tiff)$/)) {
-                    // For images, use Document AI OCR
+                    // For images, use Document AI OCR with rate limiting
                     const mimeType = this.getMimeTypeFromFileType(fileType);
-                    const text = await documentAI.extractTextFromImage(fileBuffer, mimeType);
+                    const text = await Promise.race([
+                        documentAI.extractTextFromImage(fileBuffer, mimeType),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Document AI image extraction timeout')), 90000)
+                        )
+                    ]) as string;
+
                     console.log(`✅ Document AI image extraction: ${text.length} chars`);
+
+                    // Reset failure count on success
+                    this.documentAIFailureCount = 0;
 
                     return {
                         text: text,
@@ -1758,6 +1929,9 @@ class AIJobProcessors {
 
         } catch (error) {
             console.log(`⚠️ Document AI extraction failed, falling back to standard methods: ${error}`);
+
+            // Handle the error for circuit breaker
+            this.handleDocumentAIError(error);
 
             // Fallback to existing extraction methods
             return {
@@ -1790,7 +1964,7 @@ class AIJobProcessors {
             });
 
             const courseContext = resource?.course ?
-                `Course: ${resource.course.code} - ${resource.course.title}` :
+                `Course: ${resource.course.code} - ${resource.course.title} ` :
                 'General academic content';
 
             const { geminiAI } = await import('../ai/gemini-service');
@@ -1806,7 +1980,7 @@ class AIJobProcessors {
             return learningContent;
 
         } catch (error) {
-            console.error(`❌ Learning content extraction failed:`, error);
+            console.error(`❌ Learning content extraction failed: `, error);
             return {
                 concepts: [],
                 summaries: [],
@@ -1822,9 +1996,9 @@ export const aiJobProcessors = new AIJobProcessors();
 
 // Helper function to queue AI analysis
 export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)} `;
 
-    console.log(`🚀 Creating AI analysis job: ${jobId}`);
+    console.log(`🚀 Creating AI analysis job: ${jobId} `);
 
     await db.aIProcessingJob.create({
         data: {
@@ -1836,7 +2010,7 @@ export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
         }
     });
 
-    console.log(`📝 Created database job record: ${jobId}`);
+    console.log(`📝 Created database job record: ${jobId} `);
 
     processJobInBackground(jobId, data);
 
@@ -1854,7 +2028,7 @@ export async function queueAIAnalysis(data: AnalyzeDocumentJobData) {
 
 // Helper function to get job status from database
 export async function getJobStatus(jobId: string) {
-    console.log(`📊 Getting job status for: ${jobId}`);
+    console.log(`📊 Getting job status for: ${jobId} `);
 
     const dbJob = await db.aIProcessingJob.findUnique({
         where: { id: jobId },
@@ -1890,8 +2064,8 @@ export async function getJobStatus(jobId: string) {
 
 // Background processing function for serverless environment
 async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobData) {
-    console.log(`🎯 Starting background processing for job: ${jobId}`);
-    console.log(`📄 Processing data:`, JSON.stringify(data, null, 2));
+    console.log(`🎯 Starting background processing for job: ${jobId} `);
+    console.log(`📄 Processing data: `, JSON.stringify(data, null, 2));
 
     try {
         await db.aIProcessingJob.update({
@@ -1924,7 +2098,7 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
             progress: 20
         };
 
-        console.log(`📝 Mock job data:`, JSON.stringify(mockJob, null, 2));
+        console.log(`📝 Mock job data: `, JSON.stringify(mockJob, null, 2));
 
         // Increase extraction timeout for large files (10 minutes)
         const extractionTimeout = 600000; // 10 minutes
@@ -1932,19 +2106,19 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
 
         let extractResult;
         try {
-            console.log(`⏰ Starting extraction with enhanced timeout (${extractionTimeout / 1000}s)...`);
+            console.log(`⏰ Starting extraction with enhanced timeout(${extractionTimeout / 1000}s)...`);
             extractResult = await Promise.race([
                 extractionPromise,
                 new Promise((_, reject) =>
                     setTimeout(() => {
                         console.log(`❌ Extraction timeout reached after ${extractionTimeout / 1000} seconds`);
-                        reject(new Error(`Extraction timeout after ${extractionTimeout / 60000} minutes. File may be too large or complex.`));
+                        reject(new Error(`Extraction timeout after ${extractionTimeout / 60000} minutes.File may be too large or complex.`));
                     }, extractionTimeout)
                 )
             ]);
-            console.log(`✅ Extraction completed successfully:`, extractResult);
+            console.log(`✅ Extraction completed successfully: `, extractResult);
         } catch (extractError) {
-            console.error(`❌ Extraction failed:`, extractError);
+            console.error(`❌ Extraction failed: `, extractError);
 
             // Provide more helpful error messages
             let errorMessage = 'Extraction failed';
@@ -1956,7 +2130,7 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
                 } else if (extractError.message.includes('PDF')) {
                     errorMessage = 'PDF processing failed. The file may be corrupted or password-protected.';
                 } else {
-                    errorMessage = `Processing failed: ${extractError.message}`;
+                    errorMessage = `Processing failed: ${extractError.message} `;
                 }
             }
 
@@ -1985,7 +2159,7 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
             resourceMatches: 5
         };
 
-        console.log(`📊 Final results:`, finalResults);
+        console.log(`📊 Final results: `, finalResults);
 
         await db.aIProcessingJob.update({
             where: { id: jobId },
@@ -1997,11 +2171,11 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
             }
         });
 
-        console.log(`✅ Background processing completed for job: ${jobId}`);
+        console.log(`✅ Background processing completed for job: ${jobId} `);
 
     } catch (error) {
-        console.error(`❌ Background processing failed for job: ${jobId}`, error);
-        console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+        console.error(`❌ Background processing failed for job: ${jobId} `, error);
+        console.error(`❌ Error stack: `, error instanceof Error ? error.stack : 'No stack trace');
 
         try {
             await db.aIProcessingJob.update({
@@ -2013,7 +2187,7 @@ async function processJobInBackground(jobId: string, data: AnalyzeDocumentJobDat
                 }
             });
         } catch (dbError) {
-            console.error(`❌ Failed to update job status:`, dbError);
+            console.error(`❌ Failed to update job status: `, dbError);
         }
     }
 }
